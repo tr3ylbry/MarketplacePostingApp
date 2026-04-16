@@ -1,37 +1,26 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
-import {
-  type CreateListingInput,
-  type ListingCategory,
-  type ListingCondition,
-  validateListingInput,
-} from "../../../domain/listing";
+import { type CreateListingInput, validateListingInput } from "../../../domain/listing";
 
 interface ListingFormProps {
   onCreate: (input: CreateListingInput) => void;
 }
 
-const categories: ListingCategory[] = [
-  "electronics",
-  "instruments",
-  "home",
-  "collectibles",
-  "other",
-];
-
-const conditions: ListingCondition[] = [
-  "new",
-  "like-new",
-  "good",
-  "fair",
-  "parts-or-repair",
-];
-
 const initialState: CreateListingInput = {
+  brand: "",
+  model: "",
+  year: "",
+  finish: "",
+  manufacturerCountry: "",
+  category: "",
+  subcategory: "",
+  additionalSubcategory: "",
   title: "",
   description: "",
   price: 0,
-  category: "electronics",
-  condition: "good",
+  condition: "",
+  youtubeLink: "",
+  purchasePrice: "",
+  shippingRate: "",
   imageNames: [],
 };
 
@@ -79,8 +68,97 @@ export function ListingForm({ onCreate }: ListingFormProps) {
 
       <form className="listing-form" onSubmit={handleSubmit}>
         <label>
+          Brand
+          <input
+            maxLength={35}
+            value={form.brand}
+            onChange={(event) => updateField("brand", event.target.value)}
+            placeholder="Fender"
+          />
+        </label>
+
+        <label>
+          Model
+          <input
+            maxLength={35}
+            value={form.model}
+            onChange={(event) => updateField("model", event.target.value)}
+            placeholder="Player Stratocaster"
+          />
+        </label>
+
+        <div className="form-grid">
+          <label>
+            Year
+            <input
+              maxLength={35}
+              value={form.year}
+              onChange={(event) => updateField("year", event.target.value)}
+              placeholder="2020"
+            />
+          </label>
+
+          <label>
+            Finish
+            <input
+              maxLength={35}
+              value={form.finish}
+              onChange={(event) => updateField("finish", event.target.value)}
+              placeholder="Sunburst"
+            />
+          </label>
+
+          <label>
+            Manufacturer's country
+            <input
+              maxLength={35}
+              value={form.manufacturerCountry}
+              onChange={(event) =>
+                updateField("manufacturerCountry", event.target.value)
+              }
+              placeholder="Mexico"
+            />
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            Category
+            <input
+              maxLength={35}
+              value={form.category}
+              onChange={(event) => updateField("category", event.target.value)}
+              placeholder="Guitars"
+            />
+          </label>
+
+          <label>
+            Subcategory
+            <input
+              maxLength={35}
+              value={form.subcategory}
+              onChange={(event) => updateField("subcategory", event.target.value)}
+              placeholder="Electric Guitars"
+            />
+          </label>
+
+          <label>
+            Additional subcategory
+            <input
+              maxLength={35}
+              value={form.additionalSubcategory}
+              onChange={(event) =>
+                updateField("additionalSubcategory", event.target.value)
+              }
+              placeholder="Solid Body"
+            />
+          </label>
+        </div>
+
+        <label>
           Title
           <input
+            maxLength={35}
             value={form.title}
             onChange={(event) => updateField("title", event.target.value)}
             placeholder="Fender Player Stratocaster"
@@ -111,35 +189,45 @@ export function ListingForm({ onCreate }: ListingFormProps) {
           </label>
 
           <label>
-            Category
-            <select
-              value={form.category}
-              onChange={(event) =>
-                updateField("category", event.target.value as ListingCategory)
-              }
-            >
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
+            Condition
+            <input
+              maxLength={35}
+              value={form.condition}
+              onChange={(event) => updateField("condition", event.target.value)}
+              placeholder="Like new"
+            />
           </label>
 
           <label>
-            Condition
-            <select
-              value={form.condition}
-              onChange={(event) =>
-                updateField("condition", event.target.value as ListingCondition)
-              }
-            >
-              {conditions.map((condition) => (
-                <option key={condition} value={condition}>
-                  {condition}
-                </option>
-              ))}
-            </select>
+            Shipping rate
+            <input
+              maxLength={35}
+              value={form.shippingRate}
+              onChange={(event) => updateField("shippingRate", event.target.value)}
+              placeholder="49.99"
+            />
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            What you paid
+            <input
+              maxLength={35}
+              value={form.purchasePrice}
+              onChange={(event) => updateField("purchasePrice", event.target.value)}
+              placeholder="650.00"
+            />
+          </label>
+
+          <label>
+            YouTube link
+            <input
+              maxLength={35}
+              value={form.youtubeLink}
+              onChange={(event) => updateField("youtubeLink", event.target.value)}
+              placeholder="youtu.be/..."
+            />
           </label>
         </div>
 

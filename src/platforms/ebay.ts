@@ -43,10 +43,22 @@ export const ebayAdapter: PlatformAdapter = {
 
     return {
       platform: "eBay",
-      title,
-      description,
-      price: listing.price.toFixed(2),
-      imageNames: limitedImages,
+      fields: [
+        { key: "title", label: "Title", value: title },
+        { key: "price", label: "Price", value: listing.price.toFixed(2) },
+        {
+          key: "description",
+          label: "Description",
+          value: description,
+          multiline: true,
+        },
+        {
+          key: "images",
+          label: "Images",
+          value: limitedImages.join("\n"),
+          multiline: true,
+        },
+      ],
       notes,
     };
   },

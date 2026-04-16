@@ -1,11 +1,15 @@
 import type { Listing } from "../domain/listing";
 
+export interface FormattedListingField {
+  key: string;
+  label: string;
+  value: string;
+  multiline?: boolean;
+}
+
 export interface FormattedListing {
   platform: string;
-  title: string;
-  description: string;
-  price: string;
-  imageNames: string[];
+  fields: FormattedListingField[];
   notes: string[];
 }
 

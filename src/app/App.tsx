@@ -12,9 +12,9 @@ export default function App() {
         <p className="eyebrow">Marketplace Posting Assistant</p>
         <h1>Create once, tailor per marketplace, track what is live.</h1>
         <p className="hero-copy">
-          This V1 keeps everything local. You draft one source listing, preview
-          an eBay-ready version, and keep a lightweight dashboard of active
-          items.
+          This V1 keeps everything local. You draft one source listing, flip
+          through marketplace-specific previews, and keep a lightweight
+          dashboard of active items.
         </p>
       </section>
 
