@@ -14,14 +14,35 @@ interface PlatformPreviewProps {
   photos: ListingPhotoUpload[];
 }
 
+const adapters = [
+  ebayAdapter,
+  offerupFacebookAdapter,
+  craigslistAdapter,
+  reverbAdapter,
+];
+
 export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
   const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
+  const activeListing = listing;
+  const filteredAdapters = activeListing?.isMusicalItem
+    ? adapters
+    : adapters.filter((adapter) => adapter.key !== reverbAdapter.key);
+  const clampedAdapterIndex = Math.min(
+    selectedAdapterIndex,
+    Math.max(filteredAdapters.length - 1, 0),
+  );
 
   useEffect(() => {
     setCopiedFieldKey(null);
   }, [listing, selectedAdapterIndex]);
+
+  useEffect(() => {
+    if (selectedAdapterIndex !== clampedAdapterIndex) {
+      setSelectedAdapterIndex(clampedAdapterIndex);
+    }
+  }, [clampedAdapterIndex, selectedAdapterIndex]);
 
   if (!listing) {
     return (
@@ -33,21 +54,8 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
     );
   }
 
-  const activeListing = listing;
-  const adapters = [
-    ebayAdapter,
-    offerupFacebookAdapter,
-    craigslistAdapter,
-    ...(activeListing.isMusicalItem ? [reverbAdapter] : []),
-  ];
-  const adapter = adapters[Math.min(selectedAdapterIndex, adapters.length - 1)];
+  const adapter = filteredAdapters[clampedAdapterIndex];
   const formatted = adapter.formatListing(activeListing);
-
-  useEffect(() => {
-    if (selectedAdapterIndex > adapters.length - 1) {
-      setSelectedAdapterIndex(adapters.length - 1);
-    }
-  }, [adapters.length, selectedAdapterIndex]);
 
   async function handleCopy(fieldKey: string, value: string) {
     await navigator.clipboard.writeText(value);
@@ -56,13 +64,13 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
 
   function showPreviousPreview() {
     setSelectedAdapterIndex((current) =>
-      current === 0 ? adapters.length - 1 : current - 1,
+      current === 0 ? filteredAdapters.length - 1 : current - 1,
     );
   }
 
   function showNextPreview() {
     setSelectedAdapterIndex((current) =>
-      current === adapters.length - 1 ? 0 : current + 1,
+      current === filteredAdapters.length - 1 ? 0 : current + 1,
     );
   }
 
@@ -99,7 +107,7 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
             ←
           </button>
           <span className="summary-pill">
-            {selectedAdapterIndex + 1} / {adapters.length}
+            {clampedAdapterIndex + 1} / {filteredAdapters.length}
           </span>
           <button className="secondary-button" onClick={showNextPreview} type="button">
             →
