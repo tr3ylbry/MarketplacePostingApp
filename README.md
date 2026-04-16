@@ -1,5 +1,6 @@
 # Marketplace Posting Assistant
 
+An app that will allow the user to automate a flow posting to Ebay, Craigslist, Facebook Marketplace, OfferUp, &amp; Reverb if applicable (for music related gear).
 V1 is a local-first TypeScript app for drafting one listing, formatting it for each marketplace, and tracking where it has been posted.
 
 ## Recommended Stack
