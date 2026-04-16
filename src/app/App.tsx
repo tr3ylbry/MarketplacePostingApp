@@ -4,7 +4,15 @@ import { PlatformPreview } from "../features/listings/components/PlatformPreview
 import { useListings } from "../features/listings/hooks/useListings";
 
 export default function App() {
-  const { listings, createListing, selectedListing, selectListing } = useListings();
+  const {
+    listings,
+    createListing,
+    updateListing,
+    deleteListing,
+    selectedListing,
+    selectedListingPhotos,
+    selectListing,
+  } = useListings();
 
   return (
     <main className="app-shell">
@@ -19,8 +27,14 @@ export default function App() {
       </section>
 
       <section className="workspace">
-        <ListingForm onCreate={createListing} />
-        <PlatformPreview listing={selectedListing} />
+        <ListingForm
+          listing={selectedListing}
+          photos={selectedListingPhotos}
+          onCreate={createListing}
+          onDelete={deleteListing}
+          onUpdate={updateListing}
+        />
+        <PlatformPreview listing={selectedListing} photos={selectedListingPhotos} />
       </section>
 
       <ListingDashboard

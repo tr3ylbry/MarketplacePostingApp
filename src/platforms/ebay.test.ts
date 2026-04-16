@@ -4,8 +4,10 @@ import { ebayAdapter } from "./ebay";
 describe("ebayAdapter", () => {
   it("truncates long titles and limits images", () => {
     const listing = createListing({
+      isMusicalItem: true,
       brand: "Fender",
       model: "Stratocaster",
+      type: "Electric Guitar",
       year: "",
       finish: "",
       manufacturerCountry: "",
@@ -21,16 +23,23 @@ describe("ebayAdapter", () => {
       youtubeLink: "",
       purchasePrice: "",
       shippingRate: "",
+      craigslistCity: "Phoenix",
+      craigslistZipCode: "85032",
+      craigslistSizeDimensions: "",
+      craigslistPhoneNumber: "602-555-0199",
+      craigslistContactName: "Trey",
+      craigslistStreet: "",
+      craigslistCrossStreet: "",
       imageNames: Array.from({ length: 30 }, (_, index) => `photo-${index + 1}.jpg`),
     });
 
     const formatted = ebayAdapter.formatListing(listing);
 
     const titleField = formatted.fields.find((field) => field.key === "title");
-    const imageField = formatted.fields.find((field) => field.key === "images");
+    const photoSet = formatted.photoSets[0];
 
     expect(titleField?.value.length).toBeLessThanOrEqual(80);
-    expect(imageField?.value.split("\n")).toHaveLength(24);
+    expect(photoSet.imageNames).toHaveLength(24);
     expect(formatted.notes).toContain("Title truncated to 80 characters for eBay.");
     expect(formatted.notes).toContain("Using first 24 images for eBay.");
   });

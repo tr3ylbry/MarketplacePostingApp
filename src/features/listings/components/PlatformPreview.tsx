@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import type { Listing } from "../../../domain/listing";
-import { ebayAdapter, reverbAdapter } from "../../../platforms";
+import type { ListingPhotoUpload } from "../types";
+import { buildListingPhotoBundle } from "../photoBundle";
+import {
+  craigslistAdapter,
+  ebayAdapter,
+  offerupFacebookAdapter,
+  reverbAdapter,
+} from "../../../platforms";
 
 interface PlatformPreviewProps {
   listing: Listing | null;
+  photos: ListingPhotoUpload[];
 }
 
-const adapters = [ebayAdapter, reverbAdapter];
-
-export function PlatformPreview({ listing }: PlatformPreviewProps) {
+export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
+  const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
 
   useEffect(() => {
     setCopiedFieldKey(null);
@@ -26,8 +33,21 @@ export function PlatformPreview({ listing }: PlatformPreviewProps) {
     );
   }
 
-  const adapter = adapters[selectedAdapterIndex];
-  const formatted = adapter.formatListing(listing);
+  const activeListing = listing;
+  const adapters = [
+    ebayAdapter,
+    offerupFacebookAdapter,
+    craigslistAdapter,
+    ...(activeListing.isMusicalItem ? [reverbAdapter] : []),
+  ];
+  const adapter = adapters[Math.min(selectedAdapterIndex, adapters.length - 1)];
+  const formatted = adapter.formatListing(activeListing);
+
+  useEffect(() => {
+    if (selectedAdapterIndex > adapters.length - 1) {
+      setSelectedAdapterIndex(adapters.length - 1);
+    }
+  }, [adapters.length, selectedAdapterIndex]);
 
   async function handleCopy(fieldKey: string, value: string) {
     await navigator.clipboard.writeText(value);
@@ -44,6 +64,27 @@ export function PlatformPreview({ listing }: PlatformPreviewProps) {
     setSelectedAdapterIndex((current) =>
       current === adapters.length - 1 ? 0 : current + 1,
     );
+  }
+
+  async function handleBundleDownload() {
+    if (photos.length === 0) {
+      return;
+    }
+
+    setIsDownloadingBundle(true);
+
+    try {
+      const bundle = await buildListingPhotoBundle(activeListing, photos);
+      const url = URL.createObjectURL(bundle);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = `${activeListing.title || "Listing"}_PhotoBundle.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloadingBundle(false);
+    }
   }
 
   return (
@@ -66,6 +107,22 @@ export function PlatformPreview({ listing }: PlatformPreviewProps) {
         </div>
       </div>
 
+      <div className="preview-actions">
+        <button
+          className="secondary-button"
+          disabled={photos.length === 0 || isDownloadingBundle}
+          onClick={handleBundleDownload}
+          type="button"
+        >
+          {isDownloadingBundle ? "Building Bundle..." : "Download Photo Bundle"}
+        </button>
+        {photos.length === 0 ? (
+          <p className="preview-helper">
+            Photo export is available for listings created in this session.
+          </p>
+        ) : null}
+      </div>
+
       {formatted.fields.map((field) => (
         <div className="preview-group" key={field.key}>
           <div className="preview-group-header">
@@ -84,6 +141,26 @@ export function PlatformPreview({ listing }: PlatformPreviewProps) {
           ) : (
             <p>{field.value || " "}</p>
           )}
+        </div>
+      ))}
+
+      {formatted.photoSets.map((photoSet) => (
+        <div className="preview-group" key={photoSet.key}>
+          <div className="preview-group-header">
+            <span className="preview-label">{photoSet.label} photos</span>
+          </div>
+          <p>
+            {photoSet.imageNames.length} of {photoSet.limit} selected
+          </p>
+          {photoSet.imageNames.length > 0 ? (
+            <div className="image-chip-row">
+              {photoSet.imageNames.map((imageName, index) => (
+                <span className="image-chip" key={`${photoSet.key}-${imageName}-${index}`}>
+                  {index + 1}. {imageName}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
 

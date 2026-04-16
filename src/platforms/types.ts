@@ -7,9 +7,17 @@ export interface FormattedListingField {
   multiline?: boolean;
 }
 
+export interface FormattedListingPhotoSet {
+  key: string;
+  label: string;
+  limit: number;
+  imageNames: string[];
+}
+
 export interface FormattedListing {
   platform: string;
   fields: FormattedListingField[];
+  photoSets: FormattedListingPhotoSet[];
   notes: string[];
 }
 

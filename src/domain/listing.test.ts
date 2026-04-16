@@ -3,8 +3,10 @@ import { createListing, validateListingInput } from "./listing";
 describe("listing domain", () => {
   it("creates a normalized draft listing", () => {
     const listing = createListing({
+      isMusicalItem: true,
       brand: "  Roland  ",
       model: "  SP-404 MKII  ",
+      type: "  Sampler  ",
       year: "  2022  ",
       finish: "  Black  ",
       manufacturerCountry: "  Japan  ",
@@ -19,11 +21,20 @@ describe("listing domain", () => {
       youtubeLink: "  youtu.be/demo  ",
       purchasePrice: "  350.00  ",
       shippingRate: "  25.00  ",
+      craigslistCity: "  Phoenix  ",
+      craigslistZipCode: "  85032  ",
+      craigslistSizeDimensions: "  12 x 9 x 3  ",
+      craigslistPhoneNumber: "  602-555-0199  ",
+      craigslistContactName: "  Trey  ",
+      craigslistStreet: "  Greenway  ",
+      craigslistCrossStreet: "  32nd  ",
       imageNames: ["front.jpg", "rear.jpg"],
     });
 
+    expect(listing.isMusicalItem).toBe(true);
     expect(listing.brand).toBe("Roland");
     expect(listing.model).toBe("SP-404 MKII");
+    expect(listing.type).toBe("Sampler");
     expect(listing.title).toBe("Roland SP-404 MKII");
     expect(listing.description).toBe(
       "Excellent condition sampler with power supply and original box included.",
@@ -35,8 +46,10 @@ describe("listing domain", () => {
   it("returns validation errors for incomplete input", () => {
     expect(
       validateListingInput({
+        isMusicalItem: false,
         brand: "This field is definitely more than thirty five chars",
         model: "",
+        type: "",
         year: "",
         finish: "",
         manufacturerCountry: "",
@@ -50,12 +63,23 @@ describe("listing domain", () => {
         youtubeLink: "",
         purchasePrice: "",
         shippingRate: "",
+        craigslistCity: "",
+        craigslistZipCode: "",
+        craigslistSizeDimensions: "",
+        craigslistPhoneNumber: "",
+        craigslistContactName: "",
+        craigslistStreet: "",
+        craigslistCrossStreet: "",
         imageNames: [],
       }),
     ).toEqual([
       "Title must be at least 4 characters.",
       "Description must be at least 20 characters.",
       "Price must be greater than 0.",
+      "Craigslist city or neighborhood is required.",
+      "Craigslist zip code is required.",
+      "Craigslist phone number is required.",
+      "Craigslist contact name is required.",
       "Brand must be 35 characters or fewer.",
     ]);
   });

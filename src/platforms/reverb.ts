@@ -1,5 +1,8 @@
 import type { Listing } from "../domain/listing";
+import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
+
+const REVERB_TARGET = photoTargets.find((target) => target.key === "reverb")!;
 
 export const reverbAdapter: PlatformAdapter = {
   key: "reverb",
@@ -80,6 +83,14 @@ export const reverbAdapter: PlatformAdapter = {
           key: "shippingRate",
           label: "Shipping rate",
           value: listing.shippingRate,
+        },
+      ],
+      photoSets: [
+        {
+          key: REVERB_TARGET.key,
+          label: REVERB_TARGET.label,
+          limit: REVERB_TARGET.limit,
+          imageNames: listing.imageNames.slice(0, REVERB_TARGET.limit),
         },
       ],
       notes,

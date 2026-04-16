@@ -1,8 +1,9 @@
 import type { Listing } from "../domain/listing";
+import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
 
 const EBAY_TITLE_LIMIT = 80;
-const EBAY_IMAGE_LIMIT = 24;
+const EBAY_TARGET = photoTargets.find((target) => target.key === "ebay")!;
 
 function truncate(input: string, maxLength: number): string {
   if (input.length <= maxLength) {
@@ -30,15 +31,15 @@ export const ebayAdapter: PlatformAdapter = {
       "Shipping, pickup, and payment details can be customized during posting.",
     ].join("\n");
 
-    const limitedImages = listing.imageNames.slice(0, EBAY_IMAGE_LIMIT);
+    const limitedImages = listing.imageNames.slice(0, EBAY_TARGET.limit);
     const notes: string[] = [];
 
     if (listing.title.length > EBAY_TITLE_LIMIT) {
       notes.push(`Title truncated to ${EBAY_TITLE_LIMIT} characters for eBay.`);
     }
 
-    if (listing.imageNames.length > EBAY_IMAGE_LIMIT) {
-      notes.push(`Using first ${EBAY_IMAGE_LIMIT} images for eBay.`);
+    if (listing.imageNames.length > EBAY_TARGET.limit) {
+      notes.push(`Using first ${EBAY_TARGET.limit} images for eBay.`);
     }
 
     return {
@@ -52,11 +53,13 @@ export const ebayAdapter: PlatformAdapter = {
           value: description,
           multiline: true,
         },
+      ],
+      photoSets: [
         {
-          key: "images",
-          label: "Images",
-          value: limitedImages.join("\n"),
-          multiline: true,
+          key: EBAY_TARGET.key,
+          label: EBAY_TARGET.label,
+          limit: EBAY_TARGET.limit,
+          imageNames: limitedImages,
         },
       ],
       notes,

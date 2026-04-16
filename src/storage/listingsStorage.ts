@@ -1,4 +1,4 @@
-import type { Listing } from "../domain/listing";
+import { normalizeListing, type Listing } from "../domain/listing";
 
 const STORAGE_KEY = "marketplace-posting-assistant:listings";
 
@@ -18,7 +18,15 @@ export function loadListings(): Listing[] {
   }
 
   try {
-    return JSON.parse(raw) as Listing[];
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((entry) => normalizeListing(entry))
+      .filter((entry): entry is Listing => entry !== null);
   } catch {
     return [];
   }

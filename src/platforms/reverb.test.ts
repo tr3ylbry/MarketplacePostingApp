@@ -4,8 +4,10 @@ import { reverbAdapter } from "./reverb";
 describe("reverbAdapter", () => {
   it("returns Reverb-specific posting fields", () => {
     const listing = createListing({
+      isMusicalItem: true,
       brand: "Gibson",
       model: "Les Paul Studio",
+      type: "Electric Guitar",
       year: "2018",
       finish: "Smokehouse Burst",
       manufacturerCountry: "USA",
@@ -19,6 +21,13 @@ describe("reverbAdapter", () => {
       youtubeLink: "youtu.be/demo",
       purchasePrice: "850.00",
       shippingRate: "65.00",
+      craigslistCity: "Phoenix",
+      craigslistZipCode: "85032",
+      craigslistSizeDimensions: "",
+      craigslistPhoneNumber: "602-555-0199",
+      craigslistContactName: "Trey",
+      craigslistStreet: "",
+      craigslistCrossStreet: "",
       imageNames: ["front.jpg"],
     });
 
@@ -41,6 +50,7 @@ describe("reverbAdapter", () => {
       "What you paid for the item",
       "Shipping rate",
     ]);
+    expect(formatted.photoSets[0].imageNames).toEqual(["front.jpg"]);
     expect(formatted.notes).toEqual([]);
   });
 });
