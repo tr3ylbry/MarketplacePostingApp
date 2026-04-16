@@ -4,7 +4,7 @@ import { offerupFacebookAdapter } from "./offerupFacebook";
 describe("offerupFacebookAdapter", () => {
   it("returns combined OfferUp and Facebook fields and photo caps", () => {
     const listing = createListing({
-      isMusicalItem: false,
+      selectedPlatforms: ["offerup", "facebook-marketplace"],
       brand: "Boss",
       model: "RC-505",
       type: "Looper",
@@ -38,10 +38,10 @@ describe("offerupFacebookAdapter", () => {
       "Title",
       "Price",
       "Category",
-      "OfferUp sub-category",
+      "Sub-category (OfferUp)",
       "Condition",
-      "OfferUp brand",
-      "OfferUp type",
+      "Brand (OfferUp)",
+      "Type (OfferUp)",
       "Description",
     ]);
     expect(formatted.photoSets).toEqual([

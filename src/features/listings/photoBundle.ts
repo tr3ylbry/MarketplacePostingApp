@@ -130,7 +130,7 @@ export async function buildListingPhotoBundle(
   const safeTitle = sanitizeSegment(listing.title);
   const entries: ZipEntry[] = [];
   const activeTargets = photoTargets.filter(
-    (target) => listing.isMusicalItem || target.key !== "reverb",
+    (target) => listing.selectedPlatforms.some((platform) => platform === target.key),
   );
 
   for (const target of activeTargets) {

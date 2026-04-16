@@ -4,7 +4,7 @@ import { craigslistAdapter } from "./craigslist";
 describe("craigslistAdapter", () => {
   it("returns Craigslist-specific fields and photo caps", () => {
     const listing = createListing({
-      isMusicalItem: false,
+      selectedPlatforms: ["craigslist"],
       brand: "Yamaha",
       model: "P-125",
       type: "Digital Piano",
@@ -39,17 +39,17 @@ describe("craigslistAdapter", () => {
       "Category",
       "Posting title",
       "Price",
-      "City or neighborhood",
-      "Zip code",
+      "City (Craigslist)",
+      "Zip code (Craigslist)",
       "Description",
-      "Make / manufacturer",
+      "Make / manufacturer (Craigslist)",
       "Model name / number",
-      "Size / dimensions",
+      "Size / dimensions (Craigslist)",
       "Condition",
-      "Phone number",
-      "Contact name",
-      "Street",
-      "Cross street",
+      "Phone number (Craigslist)",
+      "Contact name (Craigslist)",
+      "Street (Craigslist)",
+      "Cross street (Craigslist)",
     ]);
   });
 });

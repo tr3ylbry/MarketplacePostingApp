@@ -1,4 +1,10 @@
 export type ListingStatus = "draft" | "active" | "needs-renewal" | "sold";
+export type PlatformSiteKey =
+  | "ebay"
+  | "craigslist"
+  | "reverb"
+  | "offerup"
+  | "facebook-marketplace";
 
 export interface PostingRecord {
   platform: string;
@@ -8,7 +14,7 @@ export interface PostingRecord {
 
 export interface Listing {
   id: string;
-  isMusicalItem: boolean;
+  selectedPlatforms: PlatformSiteKey[];
   brand: string;
   model: string;
   type: string;
@@ -40,7 +46,7 @@ export interface Listing {
 }
 
 export interface CreateListingInput {
-  isMusicalItem: boolean;
+  selectedPlatforms: PlatformSiteKey[];
   brand: string;
   model: string;
   type: string;
@@ -69,9 +75,24 @@ export interface CreateListingInput {
 
 const MAX_TEXT_FIELD_LENGTH = 35;
 const MAX_IMAGE_COUNT = 25;
+const ALL_PLATFORM_KEYS: PlatformSiteKey[] = [
+  "ebay",
+  "craigslist",
+  "reverb",
+  "offerup",
+  "facebook-marketplace",
+];
 
 function normalizeText(value: string): string {
   return value.trim();
+}
+
+function normalizePlatforms(platforms: PlatformSiteKey[] = []): PlatformSiteKey[] {
+  return ALL_PLATFORM_KEYS.filter((platform) => platforms.includes(platform));
+}
+
+function hasPlatform(input: CreateListingInput | Listing, platform: PlatformSiteKey) {
+  return input.selectedPlatforms.includes(platform);
 }
 
 export function createListing(input: CreateListingInput): Listing {
@@ -79,7 +100,7 @@ export function createListing(input: CreateListingInput): Listing {
 
   return {
     id: crypto.randomUUID(),
-    isMusicalItem: input.isMusicalItem,
+    selectedPlatforms: normalizePlatforms(input.selectedPlatforms),
     brand: normalizeText(input.brand),
     model: normalizeText(input.model),
     type: normalizeText(input.type),
@@ -113,29 +134,35 @@ export function createListing(input: CreateListingInput): Listing {
 
 export function validateListingInput(input: CreateListingInput): string[] {
   const errors: string[] = [];
+  const usesReverb = hasPlatform(input, "reverb");
+  const usesCraigslist = hasPlatform(input, "craigslist");
   const textFields: Array<[label: string, value: string]> = [
-    ["Brand", input.brand],
+    ["Brand / Make", input.brand],
     ["Model", input.model],
-    ["Type", input.type],
-    ["Year", input.year],
-    ["Finish", input.finish],
-    ["Manufacturer country", input.manufacturerCountry],
+    ["Type (OfferUp)", input.type],
+    ["Year (Reverb)", input.year],
+    ["Finish (Reverb)", input.finish],
+    ["Manufacturer country (Reverb)", input.manufacturerCountry],
     ["Category", input.category],
     ["Subcategory", input.subcategory],
-    ["Additional subcategory", input.additionalSubcategory],
+    ["Additional subcategory (Reverb)", input.additionalSubcategory],
     ["Title", input.title],
     ["Condition", input.condition],
-    ["YouTube link", input.youtubeLink],
-    ["Purchase price", input.purchasePrice],
-    ["Shipping rate", input.shippingRate],
-    ["Craigslist city or neighborhood", input.craigslistCity],
-    ["Craigslist zip code", input.craigslistZipCode],
-    ["Craigslist size or dimensions", input.craigslistSizeDimensions],
-    ["Craigslist phone number", input.craigslistPhoneNumber],
-    ["Craigslist contact name", input.craigslistContactName],
-    ["Craigslist street", input.craigslistStreet],
-    ["Craigslist cross street", input.craigslistCrossStreet],
+    ["YouTube link (Reverb)", input.youtubeLink],
+    ["Purchase price (Reverb)", input.purchasePrice],
+    ["Shipping rate (Reverb)", input.shippingRate],
+    ["City (Craigslist)", input.craigslistCity],
+    ["Zip code (Craigslist)", input.craigslistZipCode],
+    ["Size / dimensions (Craigslist)", input.craigslistSizeDimensions],
+    ["Phone number (Craigslist)", input.craigslistPhoneNumber],
+    ["Contact name (Craigslist)", input.craigslistContactName],
+    ["Street (Craigslist)", input.craigslistStreet],
+    ["Cross street (Craigslist)", input.craigslistCrossStreet],
   ];
+
+  if (input.selectedPlatforms.length === 0) {
+    errors.push("Select at least one marketplace.");
+  }
 
   if (input.title.trim().length < 4) {
     errors.push("Title must be at least 4 characters.");
@@ -149,20 +176,28 @@ export function validateListingInput(input: CreateListingInput): string[] {
     errors.push("Price must be greater than 0.");
   }
 
-  if (input.craigslistCity.trim().length === 0) {
-    errors.push("Craigslist city or neighborhood is required.");
+  if (usesReverb && input.model.trim().length === 0) {
+    errors.push("Model is required for Reverb.");
   }
 
-  if (input.craigslistZipCode.trim().length === 0) {
-    errors.push("Craigslist zip code is required.");
+  if (usesReverb && input.shippingRate.trim().length === 0) {
+    errors.push("Shipping rate is required for Reverb.");
   }
 
-  if (input.craigslistPhoneNumber.trim().length === 0) {
-    errors.push("Craigslist phone number is required.");
+  if (usesCraigslist && input.craigslistCity.trim().length === 0) {
+    errors.push("City (Craigslist) is required.");
   }
 
-  if (input.craigslistContactName.trim().length === 0) {
-    errors.push("Craigslist contact name is required.");
+  if (usesCraigslist && input.craigslistZipCode.trim().length === 0) {
+    errors.push("Zip code (Craigslist) is required.");
+  }
+
+  if (usesCraigslist && input.craigslistPhoneNumber.trim().length === 0) {
+    errors.push("Phone number (Craigslist) is required.");
+  }
+
+  if (usesCraigslist && input.craigslistContactName.trim().length === 0) {
+    errors.push("Contact name (Craigslist) is required.");
   }
 
   if (input.imageNames.length > MAX_IMAGE_COUNT) {
@@ -252,11 +287,26 @@ export function normalizeListing(raw: unknown): Listing | null {
     return null;
   }
 
-  const source = raw as Partial<Listing>;
+  const source = raw as Partial<Listing> & { isMusicalItem?: boolean };
 
   return {
     id: getString(source.id) || crypto.randomUUID(),
-    isMusicalItem: typeof source.isMusicalItem === "boolean" ? source.isMusicalItem : true,
+    selectedPlatforms: (() => {
+      if (Array.isArray(source.selectedPlatforms)) {
+        return normalizePlatforms(
+          source.selectedPlatforms.filter(
+            (entry): entry is PlatformSiteKey =>
+              typeof entry === "string" && ALL_PLATFORM_KEYS.includes(entry as PlatformSiteKey),
+          ),
+        );
+      }
+
+      if (source.isMusicalItem === false) {
+        return ["ebay", "offerup", "facebook-marketplace", "craigslist"];
+      }
+
+      return ["ebay", "offerup", "facebook-marketplace", "craigslist", "reverb"];
+    })(),
     brand: getString(source.brand),
     model: getString(source.model),
     type: getString(source.type),

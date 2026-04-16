@@ -1,17 +1,25 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { type CreateListingInput, type Listing, validateListingInput } from "../../../domain/listing";
+import {
+  type CreateListingInput,
+  type Listing,
+  type PlatformSiteKey,
+  validateListingInput,
+} from "../../../domain/listing";
 import type { ListingPhotoUpload } from "../types";
 
 interface ListingFormProps {
+  mode: "create" | "edit";
   listing: Listing | null;
   photos: ListingPhotoUpload[];
+  initialSelectedPlatforms: PlatformSiteKey[];
   onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
   onUpdate: (listingId: string, input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
   onDelete: (listingId: string) => void;
+  onStartCreate: () => void;
 }
 
-const initialState: CreateListingInput = {
-  isMusicalItem: true,
+const emptyState: CreateListingInput = {
+  selectedPlatforms: [],
   brand: "",
   model: "",
   type: "",
@@ -38,13 +46,19 @@ const initialState: CreateListingInput = {
   imageNames: [],
 };
 
-function getFormState(listing: Listing | null): CreateListingInput {
+function buildInitialState(
+  listing: Listing | null,
+  initialSelectedPlatforms: PlatformSiteKey[],
+): CreateListingInput {
   if (!listing) {
-    return initialState;
+    return {
+      ...emptyState,
+      selectedPlatforms: initialSelectedPlatforms,
+    };
   }
 
   return {
-    isMusicalItem: listing.isMusicalItem,
+    selectedPlatforms: listing.selectedPlatforms,
     brand: listing.brand,
     model: listing.model,
     type: listing.type,
@@ -73,28 +87,66 @@ function getFormState(listing: Listing | null): CreateListingInput {
 }
 
 export function ListingForm({
+  mode,
   listing,
   photos: selectedListingPhotos,
+  initialSelectedPlatforms,
   onCreate,
   onUpdate,
   onDelete,
+  onStartCreate,
 }: ListingFormProps) {
-  const [form, setForm] = useState<CreateListingInput>(initialState);
+  const [form, setForm] = useState<CreateListingInput>(
+    buildInitialState(listing, initialSelectedPlatforms),
+  );
   const [errors, setErrors] = useState<string[]>([]);
   const [photos, setPhotos] = useState<ListingPhotoUpload[]>([]);
   const [orderedPhotoIds, setOrderedPhotoIds] = useState<string[]>([]);
   const [showPhotoOrdering, setShowPhotoOrdering] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
-  const [isCreatingNew, setIsCreatingNew] = useState(false);
 
   useEffect(() => {
-    setForm(getFormState(isCreatingNew ? null : listing));
-    setPhotos(isCreatingNew ? [] : selectedListingPhotos);
+    setForm(buildInitialState(mode === "edit" ? listing : null, initialSelectedPlatforms));
+    setPhotos(mode === "edit" ? selectedListingPhotos : []);
     setOrderedPhotoIds([]);
     setShowPhotoOrdering(false);
     setPhotoError(null);
     setErrors([]);
-  }, [isCreatingNew, listing, selectedListingPhotos]);
+  }, [initialSelectedPlatforms, listing, mode, selectedListingPhotos]);
+
+  const orderedPhotos = useMemo(() => {
+    const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
+    const rankedPhotos = orderedPhotoIds
+      .map((photoId) => photoMap.get(photoId))
+      .filter((photo): photo is ListingPhotoUpload => Boolean(photo));
+    const remainingPhotos = photos.filter((photo) => !orderedPhotoIds.includes(photo.id));
+
+    return [...rankedPhotos, ...remainingPhotos];
+  }, [orderedPhotoIds, photos]);
+
+  const usesOfferUp = form.selectedPlatforms.includes("offerup");
+  const usesFacebook = form.selectedPlatforms.includes("facebook-marketplace");
+  const usesCraigslist = form.selectedPlatforms.includes("craigslist");
+  const usesReverb = form.selectedPlatforms.includes("reverb");
+  const usesOfferUpFacebook = usesOfferUp || usesFacebook;
+  const showBrand = usesOfferUp || usesCraigslist || usesReverb;
+  const showModel = usesCraigslist || usesReverb;
+  const showSubcategory = usesOfferUp || usesReverb;
+
+  const selectedPlatformLabels = form.selectedPlatforms.map((platform) => {
+    switch (platform) {
+      case "ebay":
+        return "eBay";
+      case "offerup":
+        return "OfferUp";
+      case "facebook-marketplace":
+        return "Facebook Marketplace";
+      case "craigslist":
+        return "Craigslist";
+      case "reverb":
+        return "Reverb";
+    }
+  });
 
   function updateField<Key extends keyof CreateListingInput>(
     field: Key,
@@ -106,38 +158,22 @@ export function ListingForm({
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     const nextFiles = files.slice(0, 25);
-    const nextPhotos = nextFiles.map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      file,
-      previewUrl: URL.createObjectURL(file),
-    }));
 
     setPhotoError(files.length > 25 ? "You can upload up to 25 photos." : null);
-    setPhotos(nextPhotos);
+    setPhotos((current) => {
+      for (const photo of current) {
+        URL.revokeObjectURL(photo.previewUrl);
+      }
+
+      return nextFiles.map((file) => ({
+        id: crypto.randomUUID(),
+        name: file.name,
+        file,
+        previewUrl: URL.createObjectURL(file),
+      }));
+    });
     setOrderedPhotoIds([]);
-    updateField(
-      "imageNames",
-      nextFiles.map((file) => file.name),
-    );
   }
-
-  const orderedPhotos = useMemo(() => {
-    const selectedById = new Map(photos.map((photo) => [photo.id, photo]));
-    const ranked = orderedPhotoIds
-      .map((photoId) => selectedById.get(photoId))
-      .filter((photo): photo is ListingPhotoUpload => Boolean(photo));
-    const remaining = photos.filter((photo) => !orderedPhotoIds.includes(photo.id));
-
-    return [...ranked, ...remaining];
-  }, [orderedPhotoIds, photos]);
-
-  useEffect(() => {
-    updateField(
-      "imageNames",
-      orderedPhotos.map((photo) => photo.name),
-    );
-  }, [orderedPhotos]);
 
   function handlePhotoOrderClick(photoId: string) {
     setOrderedPhotoIds((current) => {
@@ -153,30 +189,27 @@ export function ListingForm({
     setOrderedPhotoIds((current) => current.slice(0, -1));
   }
 
-  function resetForNewListing() {
-    setIsCreatingNew(true);
-    setForm(initialState);
-    setErrors([]);
-    setPhotoError(null);
-    setOrderedPhotoIds([]);
-    setShowPhotoOrdering(false);
-    setPhotos([]);
-  }
-
   function handleDelete() {
-    if (!listing || isCreatingNew) {
+    if (!listing) {
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this listing?")) {
       return;
     }
 
     onDelete(listing.id);
-    resetForNewListing();
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const nextInput = {
+
+    const nextInput: CreateListingInput = {
       ...form,
-      imageNames: orderedPhotos.map((photo) => photo.name),
+      imageNames:
+        orderedPhotos.length > 0
+          ? orderedPhotos.map((photo) => photo.name)
+          : form.imageNames,
     };
     const nextErrors = validateListingInput(nextInput);
 
@@ -185,39 +218,31 @@ export function ListingForm({
       return;
     }
 
-    if (listing && !isCreatingNew) {
-      onUpdate(listing.id, nextInput, orderedPhotos);
-    } else {
-      onCreate(nextInput, orderedPhotos);
-      setIsCreatingNew(false);
+    if (mode === "edit" && listing) {
+      onUpdate(listing.id, nextInput, orderedPhotos.length > 0 ? orderedPhotos : selectedListingPhotos);
+      return;
     }
 
-    setErrors([]);
+    onCreate(nextInput, orderedPhotos);
   }
 
-  const isEditing = Boolean(listing) && !isCreatingNew;
+  const displayImageNames =
+    orderedPhotos.length > 0 ? orderedPhotos.map((photo) => photo.name) : form.imageNames;
 
   return (
     <section className="panel">
       <div className="panel-header">
         <div>
-          <p className="panel-kicker">{isEditing ? "Edit Listing" : "V1 Input"}</p>
-          <h2>{isEditing ? "Update listing" : "Create listing"}</h2>
+          <p className="panel-kicker">{mode === "edit" ? "Edit Listing" : "Create Listing"}</p>
+          <h2>{mode === "edit" ? "Update listing" : "Create listing"}</h2>
         </div>
         <div className="preview-actions">
-          <button className="secondary-button" onClick={resetForNewListing} type="button">
-            New listing
-          </button>
-          {isCreatingNew && listing ? (
-            <button
-              className="secondary-button"
-              onClick={() => setIsCreatingNew(false)}
-              type="button"
-            >
-              Edit selected
+          {mode === "edit" ? (
+            <button className="secondary-button" onClick={onStartCreate} type="button">
+              Create a listing
             </button>
           ) : null}
-          {isEditing ? (
+          {mode === "edit" && listing ? (
             <button className="danger-button" onClick={handleDelete} type="button">
               Delete
             </button>
@@ -225,33 +250,32 @@ export function ListingForm({
         </div>
       </div>
 
-      <form className="listing-form" onSubmit={handleSubmit}>
-        <label className="checkbox-row">
-          <input
-            checked={form.isMusicalItem}
-            onChange={(event) => updateField("isMusicalItem", event.target.checked)}
-            type="checkbox"
-          />
-          <span>Is this a musical item?</span>
-        </label>
+      <div className="image-chip-row">
+        {selectedPlatformLabels.map((label) => (
+          <span className="image-chip" key={label}>
+            {label}
+          </span>
+        ))}
+      </div>
 
+      <form className="listing-form" onSubmit={handleSubmit}>
         <label>
           Title
           <input
             maxLength={35}
-            value={form.title}
             onChange={(event) => updateField("title", event.target.value)}
             placeholder="Fender Player Stratocaster"
+            value={form.title}
           />
         </label>
 
         <label>
           Description
           <textarea
-            value={form.description}
             onChange={(event) => updateField("description", event.target.value)}
-            rows={7}
             placeholder="Include condition details, included accessories, pickup or shipping notes, and anything a buyer should know."
+            rows={7}
+            value={form.description}
           />
         </label>
 
@@ -260,11 +284,11 @@ export function ListingForm({
             Price
             <input
               min="0"
+              onChange={(event) => updateField("price", Number(event.target.value))}
               placeholder="899.00"
               step="0.01"
               type="number"
               value={form.price || ""}
-              onChange={(event) => updateField("price", Number(event.target.value))}
             />
           </label>
 
@@ -272,9 +296,9 @@ export function ListingForm({
             Category
             <input
               maxLength={35}
-              value={form.category}
               onChange={(event) => updateField("category", event.target.value)}
               placeholder="Guitars"
+              value={form.category}
             />
           </label>
 
@@ -282,222 +306,242 @@ export function ListingForm({
             Condition
             <input
               maxLength={35}
-              value={form.condition}
               onChange={(event) => updateField("condition", event.target.value)}
               placeholder="Like new"
+              value={form.condition}
             />
           </label>
         </div>
 
-        <div className="form-grid">
-          <label>
-            Brand
-            <input
-              maxLength={35}
-              value={form.brand}
-              onChange={(event) => updateField("brand", event.target.value)}
-              placeholder="Fender"
-            />
-          </label>
+        {showBrand || showModel || usesOfferUp ? (
+          <div className="form-grid">
+            {showBrand ? (
+              <label>
+                {usesCraigslist && !usesOfferUp && !usesReverb
+                  ? "Make / Manufacturer (Craigslist)"
+                  : "Brand / Make"}
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("brand", event.target.value)}
+                  placeholder="Fender"
+                  value={form.brand}
+                />
+              </label>
+            ) : null}
 
-          <label>
-            Model
-            <input
-              maxLength={35}
-              value={form.model}
-              onChange={(event) => updateField("model", event.target.value)}
-              placeholder="Player Stratocaster"
-            />
-          </label>
+            {showModel ? (
+              <label>
+                {usesCraigslist && !usesReverb ? "Model name / number (Craigslist)" : "Model"}
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("model", event.target.value)}
+                  placeholder="Player Stratocaster"
+                  value={form.model}
+                />
+              </label>
+            ) : null}
 
-          <label>
-            Type
-            <input
-              maxLength={35}
-              value={form.type}
-              onChange={(event) => updateField("type", event.target.value)}
-              placeholder="Electric Guitar"
-            />
-          </label>
-        </div>
+            {usesOfferUp ? (
+              <label>
+                Type (OfferUp)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("type", event.target.value)}
+                  placeholder="Electric Guitar"
+                  value={form.type}
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
 
-        {form.isMusicalItem ? (
+        {usesReverb ? (
           <>
             <div className="form-grid">
               <label>
-                Year
+                Year (Reverb)
                 <input
                   maxLength={35}
-                  value={form.year}
                   onChange={(event) => updateField("year", event.target.value)}
                   placeholder="2020"
+                  value={form.year}
                 />
               </label>
 
               <label>
-                Finish
+                Finish (Reverb)
                 <input
                   maxLength={35}
-                  value={form.finish}
                   onChange={(event) => updateField("finish", event.target.value)}
                   placeholder="Sunburst"
+                  value={form.finish}
                 />
               </label>
 
               <label>
-                Manufacturer's country
+                Manufacturer's country (Reverb)
                 <input
                   maxLength={35}
-                  value={form.manufacturerCountry}
-                  onChange={(event) =>
-                    updateField("manufacturerCountry", event.target.value)
-                  }
+                  onChange={(event) => updateField("manufacturerCountry", event.target.value)}
                   placeholder="Mexico"
+                  value={form.manufacturerCountry}
                 />
               </label>
             </div>
 
             <div className="form-grid">
-              <label>
-                Subcategory
-                <input
-                  maxLength={35}
-                  value={form.subcategory}
-                  onChange={(event) => updateField("subcategory", event.target.value)}
-                  placeholder="Electric Guitars"
-                />
-              </label>
+              {showSubcategory ? (
+                <label>
+                  {usesOfferUp ? "Subcategory" : "Subcategory (Reverb)"}
+                  <input
+                    maxLength={35}
+                    onChange={(event) => updateField("subcategory", event.target.value)}
+                    placeholder="Electric Guitars"
+                    value={form.subcategory}
+                  />
+                </label>
+              ) : null}
 
               <label>
-                Additional subcategory
+                Additional subcategory (Reverb)
                 <input
                   maxLength={35}
-                  value={form.additionalSubcategory}
-                  onChange={(event) =>
-                    updateField("additionalSubcategory", event.target.value)
-                  }
+                  onChange={(event) => updateField("additionalSubcategory", event.target.value)}
                   placeholder="Solid Body"
+                  value={form.additionalSubcategory}
                 />
               </label>
 
               <label>
-                Shipping rate
+                Shipping rate (Reverb)
                 <input
                   maxLength={35}
-                  value={form.shippingRate}
                   onChange={(event) => updateField("shippingRate", event.target.value)}
                   placeholder="49.99"
+                  value={form.shippingRate}
                 />
               </label>
             </div>
 
             <div className="form-grid">
               <label>
-                What you paid
+                What you paid (Reverb)
                 <input
                   maxLength={35}
-                  value={form.purchasePrice}
                   onChange={(event) => updateField("purchasePrice", event.target.value)}
                   placeholder="650.00"
+                  value={form.purchasePrice}
                 />
               </label>
 
               <label>
-                YouTube link
+                YouTube link (Reverb)
                 <input
                   maxLength={35}
-                  value={form.youtubeLink}
                   onChange={(event) => updateField("youtubeLink", event.target.value)}
                   placeholder="youtu.be/..."
+                  value={form.youtubeLink}
                 />
               </label>
             </div>
           </>
+        ) : showSubcategory ? (
+          <div className="form-grid">
+            <label>
+              Sub-category (OfferUp)
+              <input
+                maxLength={35}
+                onChange={(event) => updateField("subcategory", event.target.value)}
+                placeholder="Electric Guitars"
+                value={form.subcategory}
+              />
+            </label>
+          </div>
         ) : null}
 
-        <div className="form-grid">
-          <label>
-            Craigslist city or neighborhood
-            <input
-              maxLength={35}
-              value={form.craigslistCity}
-              onChange={(event) => updateField("craigslistCity", event.target.value)}
-              placeholder="North Phoenix"
-            />
-          </label>
+        {usesCraigslist ? (
+          <>
+            <div className="form-grid">
+              <label>
+                City (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("craigslistCity", event.target.value)}
+                  placeholder="North Phoenix"
+                  value={form.craigslistCity}
+                />
+              </label>
 
-          <label>
-            Craigslist zip code
-            <input
-              maxLength={35}
-              value={form.craigslistZipCode}
-              onChange={(event) => updateField("craigslistZipCode", event.target.value)}
-              placeholder="85032"
-            />
-          </label>
+              <label>
+                Zip code (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("craigslistZipCode", event.target.value)}
+                  placeholder="85032"
+                  value={form.craigslistZipCode}
+                />
+              </label>
 
-          <label>
-            Craigslist contact name
-            <input
-              maxLength={35}
-              value={form.craigslistContactName}
-              onChange={(event) =>
-                updateField("craigslistContactName", event.target.value)
-              }
-              placeholder="Trey"
-            />
-          </label>
-        </div>
+              <label>
+                Contact name (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("craigslistContactName", event.target.value)}
+                  placeholder="Trey"
+                  value={form.craigslistContactName}
+                />
+              </label>
+            </div>
 
-        <div className="form-grid">
-          <label>
-            Craigslist phone number
-            <input
-              maxLength={35}
-              value={form.craigslistPhoneNumber}
-              onChange={(event) =>
-                updateField("craigslistPhoneNumber", event.target.value)
-              }
-              placeholder="602-555-0199"
-            />
-          </label>
+            <div className="form-grid">
+              <label>
+                Phone number (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("craigslistPhoneNumber", event.target.value)}
+                  placeholder="602-555-0199"
+                  value={form.craigslistPhoneNumber}
+                />
+              </label>
 
-          <label>
-            Craigslist size / dimensions
-            <input
-              maxLength={35}
-              value={form.craigslistSizeDimensions}
-              onChange={(event) =>
-                updateField("craigslistSizeDimensions", event.target.value)
-              }
-              placeholder="24 x 16 x 6"
-            />
-          </label>
+              <label>
+                Size / dimensions (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) =>
+                    updateField("craigslistSizeDimensions", event.target.value)
+                  }
+                  placeholder="24 x 16 x 6"
+                  value={form.craigslistSizeDimensions}
+                />
+              </label>
 
-          <label>
-            Craigslist street
-            <input
-              maxLength={35}
-              value={form.craigslistStreet}
-              onChange={(event) => updateField("craigslistStreet", event.target.value)}
-              placeholder="Greenway Rd"
-            />
-          </label>
-        </div>
+              <label>
+                Street (Craigslist)
+                <input
+                  maxLength={35}
+                  onChange={(event) => updateField("craigslistStreet", event.target.value)}
+                  placeholder="Greenway Rd"
+                  value={form.craigslistStreet}
+                />
+              </label>
+            </div>
 
-        <label>
-          Craigslist cross street
-          <input
-            maxLength={35}
-            value={form.craigslistCrossStreet}
-            onChange={(event) => updateField("craigslistCrossStreet", event.target.value)}
-            placeholder="32nd St"
-          />
-        </label>
+            <label>
+              Cross street (Craigslist)
+              <input
+                maxLength={35}
+                onChange={(event) => updateField("craigslistCrossStreet", event.target.value)}
+                placeholder="32nd St"
+                value={form.craigslistCrossStreet}
+              />
+            </label>
+          </>
+        ) : null}
 
         <label>
           Photos
-          <input accept="image/*" multiple type="file" onChange={handleImageChange} />
+          <input accept="image/*" multiple onChange={handleImageChange} type="file" />
         </label>
 
         {photos.length > 0 ? (
@@ -552,11 +596,11 @@ export function ListingForm({
           </div>
         ) : null}
 
-        {orderedPhotos.length > 0 ? (
+        {displayImageNames.length > 0 ? (
           <div className="image-chip-row">
-            {orderedPhotos.map((photo, index) => (
-              <span className="image-chip" key={photo.id}>
-                {index + 1}. {photo.name}
+            {displayImageNames.map((imageName, index) => (
+              <span className="image-chip" key={`${imageName}-${index}`}>
+                {index + 1}. {imageName}
               </span>
             ))}
           </div>
@@ -573,7 +617,7 @@ export function ListingForm({
         ) : null}
 
         <button className="primary-button" type="submit">
-          {isEditing ? "Save changes" : "Save listing"}
+          {mode === "edit" ? "Save changes" : "Save listing"}
         </button>
       </form>
     </section>

@@ -4,7 +4,7 @@ import { reverbAdapter } from "./reverb";
 describe("reverbAdapter", () => {
   it("returns Reverb-specific posting fields", () => {
     const listing = createListing({
-      isMusicalItem: true,
+      selectedPlatforms: ["reverb"],
       brand: "Gibson",
       model: "Les Paul Studio",
       type: "Electric Guitar",

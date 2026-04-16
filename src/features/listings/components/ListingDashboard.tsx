@@ -3,13 +3,15 @@ import { getListingAgeLabel, type Listing } from "../../../domain/listing";
 interface ListingDashboardProps {
   listings: Listing[];
   selectedListingId: string | null;
-  onSelect: (listingId: string) => void;
+  onEdit: (listingId: string) => void;
+  onDelete: (listingId: string) => void;
 }
 
 export function ListingDashboard({
   listings,
   selectedListingId,
-  onSelect,
+  onEdit,
+  onDelete,
 }: ListingDashboardProps) {
   return (
     <section className="panel">
@@ -31,12 +33,7 @@ export function ListingDashboard({
             const isSelected = listing.id === selectedListingId;
 
             return (
-              <button
-                className={`listing-card ${isSelected ? "selected" : ""}`}
-                key={listing.id}
-                onClick={() => onSelect(listing.id)}
-                type="button"
-              >
+              <article className={`listing-card ${isSelected ? "selected" : ""}`} key={listing.id}>
                 <div className="listing-card-header">
                   <h3>{listing.title}</h3>
                   <span className={`status-pill status-${listing.status}`}>
@@ -48,7 +45,23 @@ export function ListingDashboard({
                   {listing.category} · {listing.condition}
                 </p>
                 <p>{getListingAgeLabel(listing.createdAt)}</p>
-              </button>
+                <div className="listing-card-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() => onEdit(listing.id)}
+                    type="button"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="danger-button"
+                    onClick={() => onDelete(listing.id)}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
             );
           })}
         </div>

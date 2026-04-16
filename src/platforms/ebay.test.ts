@@ -4,7 +4,7 @@ import { ebayAdapter } from "./ebay";
 describe("ebayAdapter", () => {
   it("truncates long titles and limits images", () => {
     const listing = createListing({
-      isMusicalItem: true,
+      selectedPlatforms: ["ebay"],
       brand: "Fender",
       model: "Stratocaster",
       type: "Electric Guitar",

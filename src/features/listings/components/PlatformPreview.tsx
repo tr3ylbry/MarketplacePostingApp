@@ -25,10 +25,26 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
   const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
-  const activeListing = listing;
-  const filteredAdapters = activeListing?.isMusicalItem
-    ? adapters
-    : adapters.filter((adapter) => adapter.key !== reverbAdapter.key);
+  const filteredAdapters = listing
+    ? adapters.filter((adapter) => {
+        if (adapter.key === offerupFacebookAdapter.key) {
+          return (
+            listing.selectedPlatforms.includes("offerup") ||
+            listing.selectedPlatforms.includes("facebook-marketplace")
+          );
+        }
+
+        if (adapter.key === ebayAdapter.key) {
+          return listing.selectedPlatforms.includes("ebay");
+        }
+
+        if (adapter.key === craigslistAdapter.key) {
+          return listing.selectedPlatforms.includes("craigslist");
+        }
+
+        return listing.selectedPlatforms.includes("reverb");
+      })
+    : adapters;
   const clampedAdapterIndex = Math.min(
     selectedAdapterIndex,
     Math.max(filteredAdapters.length - 1, 0),
@@ -49,11 +65,12 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
       <section className="panel panel-muted">
         <p className="panel-kicker">Platform Preview</p>
         <h2>No listing selected yet</h2>
-        <p>Create a listing to preview each marketplace adapter.</p>
+          <p>Create a listing to preview each marketplace adapter.</p>
       </section>
     );
   }
 
+  const activeListing = listing;
   const adapter = filteredAdapters[clampedAdapterIndex];
   const formatted = adapter.formatListing(activeListing);
 

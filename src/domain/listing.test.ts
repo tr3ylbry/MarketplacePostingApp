@@ -3,7 +3,7 @@ import { createListing, validateListingInput } from "./listing";
 describe("listing domain", () => {
   it("creates a normalized draft listing", () => {
     const listing = createListing({
-      isMusicalItem: true,
+      selectedPlatforms: ["ebay", "craigslist", "reverb"],
       brand: "  Roland  ",
       model: "  SP-404 MKII  ",
       type: "  Sampler  ",
@@ -31,7 +31,7 @@ describe("listing domain", () => {
       imageNames: ["front.jpg", "rear.jpg"],
     });
 
-    expect(listing.isMusicalItem).toBe(true);
+    expect(listing.selectedPlatforms).toEqual(["ebay", "craigslist", "reverb"]);
     expect(listing.brand).toBe("Roland");
     expect(listing.model).toBe("SP-404 MKII");
     expect(listing.type).toBe("Sampler");
@@ -46,7 +46,7 @@ describe("listing domain", () => {
   it("returns validation errors for incomplete input", () => {
     expect(
       validateListingInput({
-        isMusicalItem: false,
+        selectedPlatforms: ["craigslist"],
         brand: "This field is definitely more than thirty five chars",
         model: "",
         type: "",
@@ -76,11 +76,11 @@ describe("listing domain", () => {
       "Title must be at least 4 characters.",
       "Description must be at least 20 characters.",
       "Price must be greater than 0.",
-      "Craigslist city or neighborhood is required.",
-      "Craigslist zip code is required.",
-      "Craigslist phone number is required.",
-      "Craigslist contact name is required.",
-      "Brand must be 35 characters or fewer.",
+      "City (Craigslist) is required.",
+      "Zip code (Craigslist) is required.",
+      "Phone number (Craigslist) is required.",
+      "Contact name (Craigslist) is required.",
+      "Brand / Make must be 35 characters or fewer.",
     ]);
   });
 });
