@@ -65,7 +65,7 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
       <section className="panel panel-muted">
         <p className="panel-kicker">Platform Preview</p>
         <h2>No listing selected yet</h2>
-          <p>Create a listing to preview each marketplace adapter.</p>
+        <p>Create a listing to preview each marketplace adapter.</p>
       </section>
     );
   }

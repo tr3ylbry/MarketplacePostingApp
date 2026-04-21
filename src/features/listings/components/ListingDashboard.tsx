@@ -31,6 +31,13 @@ export function ListingDashboard({
         <div className="dashboard-list">
           {listings.map((listing) => {
             const isSelected = listing.id === selectedListingId;
+            const categoryLabel =
+              listing.ebayCategory ||
+              listing.offerupCategory ||
+              listing.facebookCategory ||
+              listing.craigslistCategory ||
+              listing.reverbCategory ||
+              "No Category";
 
             return (
               <article className={`listing-card ${isSelected ? "selected" : ""}`} key={listing.id}>
@@ -42,7 +49,7 @@ export function ListingDashboard({
                 </div>
                 <p>${listing.price.toFixed(2)}</p>
                 <p>
-                  {listing.category} · {listing.condition}
+                  {categoryLabel} · {listing.condition || "No Condition"}
                 </p>
                 <p>{getListingAgeLabel(listing.createdAt)}</p>
                 <div className="listing-card-actions">

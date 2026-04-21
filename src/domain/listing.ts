@@ -21,9 +21,14 @@ export interface Listing {
   year: string;
   finish: string;
   manufacturerCountry: string;
-  category: string;
-  subcategory: string;
-  additionalSubcategory: string;
+  ebayCategory: string;
+  offerupCategory: string;
+  offerupSubcategory: string;
+  facebookCategory: string;
+  craigslistCategory: string;
+  reverbCategory: string;
+  reverbSubcategory: string;
+  reverbAdditionalSubcategory: string;
   title: string;
   description: string;
   price: number;
@@ -53,9 +58,14 @@ export interface CreateListingInput {
   year: string;
   finish: string;
   manufacturerCountry: string;
-  category: string;
-  subcategory: string;
-  additionalSubcategory: string;
+  ebayCategory: string;
+  offerupCategory: string;
+  offerupSubcategory: string;
+  facebookCategory: string;
+  craigslistCategory: string;
+  reverbCategory: string;
+  reverbSubcategory: string;
+  reverbAdditionalSubcategory: string;
   title: string;
   description: string;
   price: number;
@@ -107,9 +117,14 @@ export function createListing(input: CreateListingInput): Listing {
     year: normalizeText(input.year),
     finish: normalizeText(input.finish),
     manufacturerCountry: normalizeText(input.manufacturerCountry),
-    category: normalizeText(input.category),
-    subcategory: normalizeText(input.subcategory),
-    additionalSubcategory: normalizeText(input.additionalSubcategory),
+    ebayCategory: normalizeText(input.ebayCategory),
+    offerupCategory: normalizeText(input.offerupCategory),
+    offerupSubcategory: normalizeText(input.offerupSubcategory),
+    facebookCategory: normalizeText(input.facebookCategory),
+    craigslistCategory: normalizeText(input.craigslistCategory),
+    reverbCategory: normalizeText(input.reverbCategory),
+    reverbSubcategory: normalizeText(input.reverbSubcategory),
+    reverbAdditionalSubcategory: normalizeText(input.reverbAdditionalSubcategory),
     title: normalizeText(input.title),
     description: input.description.trim(),
     price: input.price,
@@ -136,6 +151,9 @@ export function validateListingInput(input: CreateListingInput): string[] {
   const errors: string[] = [];
   const usesReverb = hasPlatform(input, "reverb");
   const usesCraigslist = hasPlatform(input, "craigslist");
+  const usesOfferUp = hasPlatform(input, "offerup");
+  const usesFacebook = hasPlatform(input, "facebook-marketplace");
+  const usesEbay = hasPlatform(input, "ebay");
   const textFields: Array<[label: string, value: string]> = [
     ["Brand / Make", input.brand],
     ["Model", input.model],
@@ -143,9 +161,14 @@ export function validateListingInput(input: CreateListingInput): string[] {
     ["Year (Reverb)", input.year],
     ["Finish (Reverb)", input.finish],
     ["Manufacturer country (Reverb)", input.manufacturerCountry],
-    ["Category", input.category],
-    ["Subcategory", input.subcategory],
-    ["Additional subcategory (Reverb)", input.additionalSubcategory],
+    ["Category (eBay)", input.ebayCategory],
+    ["Category (OfferUp)", input.offerupCategory],
+    ["Sub-category (OfferUp)", input.offerupSubcategory],
+    ["Category (Facebook Marketplace)", input.facebookCategory],
+    ["Category (Craigslist)", input.craigslistCategory],
+    ["Category (Reverb)", input.reverbCategory],
+    ["Subcategory (Reverb)", input.reverbSubcategory],
+    ["Additional subcategory (Reverb)", input.reverbAdditionalSubcategory],
     ["Title", input.title],
     ["Condition", input.condition],
     ["YouTube link (Reverb)", input.youtubeLink],
@@ -176,12 +199,40 @@ export function validateListingInput(input: CreateListingInput): string[] {
     errors.push("Price must be greater than 0.");
   }
 
+  if (usesEbay && input.ebayCategory.trim().length === 0) {
+    errors.push("Category (eBay) is required.");
+  }
+
+  if (usesOfferUp && input.offerupCategory.trim().length === 0) {
+    errors.push("Category (OfferUp) is required.");
+  }
+
+  if (usesOfferUp && input.offerupSubcategory.trim().length === 0) {
+    errors.push("Sub-category (OfferUp) is required.");
+  }
+
+  if (usesFacebook && input.facebookCategory.trim().length === 0) {
+    errors.push("Category (Facebook Marketplace) is required.");
+  }
+
   if (usesReverb && input.model.trim().length === 0) {
     errors.push("Model is required for Reverb.");
   }
 
+  if (usesReverb && input.brand.trim().length === 0) {
+    errors.push("Brand / Make is required for Reverb.");
+  }
+
+  if (usesReverb && input.reverbCategory.trim().length === 0) {
+    errors.push("Category (Reverb) is required.");
+  }
+
   if (usesReverb && input.shippingRate.trim().length === 0) {
     errors.push("Shipping rate is required for Reverb.");
+  }
+
+  if (usesCraigslist && input.craigslistCategory.trim().length === 0) {
+    errors.push("Category (Craigslist) is required.");
   }
 
   if (usesCraigslist && input.craigslistCity.trim().length === 0) {
@@ -287,7 +338,12 @@ export function normalizeListing(raw: unknown): Listing | null {
     return null;
   }
 
-  const source = raw as Partial<Listing> & { isMusicalItem?: boolean };
+  const source = raw as Partial<Listing> & {
+    isMusicalItem?: boolean;
+    category?: string;
+    subcategory?: string;
+    additionalSubcategory?: string;
+  };
 
   return {
     id: getString(source.id) || crypto.randomUUID(),
@@ -313,9 +369,16 @@ export function normalizeListing(raw: unknown): Listing | null {
     year: getString(source.year),
     finish: getString(source.finish),
     manufacturerCountry: getString(source.manufacturerCountry),
-    category: getString(source.category),
-    subcategory: getString(source.subcategory),
-    additionalSubcategory: getString(source.additionalSubcategory),
+    ebayCategory: getString(source.ebayCategory),
+    offerupCategory: getString(source.offerupCategory),
+    offerupSubcategory: getString(source.offerupSubcategory || source.subcategory),
+    facebookCategory: getString(source.facebookCategory),
+    craigslistCategory: getString(source.craigslistCategory || source.category),
+    reverbCategory: getString(source.reverbCategory || source.category),
+    reverbSubcategory: getString(source.reverbSubcategory || source.subcategory),
+    reverbAdditionalSubcategory: getString(
+      source.reverbAdditionalSubcategory || source.additionalSubcategory,
+    ),
     title: getString(source.title),
     description: getString(source.description),
     price: getNumber(source.price),

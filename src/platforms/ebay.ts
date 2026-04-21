@@ -24,7 +24,7 @@ export const ebayAdapter: PlatformAdapter = {
       `${listing.title}`,
       "",
       `Condition: ${conditionLabel}`,
-      `Category: ${listing.category}`,
+      `Category: ${listing.ebayCategory}`,
       "",
       listing.description.trim(),
       "",
@@ -47,6 +47,7 @@ export const ebayAdapter: PlatformAdapter = {
       fields: [
         { key: "title", label: "Title", value: title },
         { key: "price", label: "Price", value: listing.price.toFixed(2) },
+        { key: "category", label: "Category", value: listing.ebayCategory },
         {
           key: "description",
           label: "Description",

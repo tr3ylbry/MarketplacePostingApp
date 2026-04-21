@@ -18,7 +18,7 @@ export const reverbAdapter: PlatformAdapter = {
       notes.push("Model is required for Reverb.");
     }
 
-    if (!listing.category) {
+    if (!listing.reverbCategory) {
       notes.push("Category is required for Reverb.");
     }
 
@@ -50,12 +50,12 @@ export const reverbAdapter: PlatformAdapter = {
           label: "Manufacturer's country",
           value: listing.manufacturerCountry,
         },
-        { key: "category", label: "Category", value: listing.category },
-        { key: "subcategory", label: "Subcategory", value: listing.subcategory },
+        { key: "category", label: "Category (Reverb)", value: listing.reverbCategory },
+        { key: "subcategory", label: "Subcategory (Reverb)", value: listing.reverbSubcategory },
         {
           key: "additionalSubcategory",
-          label: "Additional subcategory",
-          value: listing.additionalSubcategory,
+          label: "Additional subcategory (Reverb)",
+          value: listing.reverbAdditionalSubcategory,
         },
         { key: "title", label: "Listing title", value: listing.title },
         {

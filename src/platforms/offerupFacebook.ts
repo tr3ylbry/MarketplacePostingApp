@@ -29,8 +29,12 @@ export const offerupFacebookAdapter: PlatformAdapter = {
       notes.push(`Description is required for ${platformLabel}.`);
     }
 
-    if (!listing.category) {
-      notes.push(`Category is required for ${platformLabel}.`);
+    if (usesOfferUp && !listing.offerupCategory) {
+      notes.push("Category is required for OfferUp.");
+    }
+
+    if (usesFacebook && !listing.facebookCategory) {
+      notes.push("Category is required for Facebook Marketplace.");
     }
 
     if (!listing.condition) {
@@ -46,9 +50,36 @@ export const offerupFacebookAdapter: PlatformAdapter = {
       fields: [
         { key: "title", label: "Title", value: listing.title },
         { key: "price", label: "Price", value: listing.price > 0 ? listing.price.toFixed(2) : "" },
-        { key: "category", label: "Category", value: listing.category },
+        ...(usesOfferUp && usesFacebook
+          ? [
+              {
+                key: "offerupCategory",
+                label: "Category (OfferUp)",
+                value: listing.offerupCategory,
+              },
+              {
+                key: "facebookCategory",
+                label: "Category (Facebook Marketplace)",
+                value: listing.facebookCategory,
+              },
+            ]
+          : usesOfferUp
+            ? [{ key: "offerupCategory", label: "Category", value: listing.offerupCategory }]
+            : [
+                {
+                  key: "facebookCategory",
+                  label: "Category",
+                  value: listing.facebookCategory,
+                },
+              ]),
         ...(usesOfferUp
-          ? [{ key: "subcategory", label: "Sub-category (OfferUp)", value: listing.subcategory }]
+          ? [
+              {
+                key: "offerupSubcategory",
+                label: "Sub-category (OfferUp)",
+                value: listing.offerupSubcategory,
+              },
+            ]
           : []),
         { key: "condition", label: "Condition", value: listing.condition },
         ...(usesOfferUp

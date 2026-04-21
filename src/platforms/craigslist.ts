@@ -10,7 +10,7 @@ export const craigslistAdapter: PlatformAdapter = {
   formatListing(listing: Listing) {
     const notes: string[] = [];
 
-    if (!listing.category) {
+    if (!listing.craigslistCategory) {
       notes.push("Category is required for Craigslist.");
     }
 
@@ -57,7 +57,7 @@ export const craigslistAdapter: PlatformAdapter = {
     return {
       platform: "Craigslist",
       fields: [
-        { key: "category", label: "Category", value: listing.category },
+        { key: "category", label: "Category (Craigslist)", value: listing.craigslistCategory },
         { key: "title", label: "Posting title", value: listing.title },
         { key: "price", label: "Price", value: listing.price > 0 ? listing.price.toFixed(2) : "" },
         {
