@@ -53,7 +53,7 @@ textarea {
 
 .hero h1 {
   font-size: clamp(2rem, 4vw, 3.7rem);
-  max-width: 10ch;
+  max-width: 20ch;
   line-height: 0.95;
 }
 
@@ -143,6 +143,13 @@ textarea {
   font-weight: 600;
 }
 
+.field-row > label,
+.field-row.single > label {
+  display: grid;
+  grid-template-rows: minmax(2.8rem, auto) auto;
+  align-content: start;
+}
+
 .listing-form input,
 .listing-form select,
 .listing-form textarea {
@@ -180,6 +187,7 @@ textarea {
 }
 
 .field-label {
+  display: block;
   font-size: 0.95rem;
   color: #1f2933;
 }
@@ -475,6 +483,35 @@ textarea {
   margin: 0;
   padding-left: 18px;
   color: #9f1239;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.28);
+  z-index: 40;
+}
+
+.modal-card {
+  width: min(460px, 100%);
+  background: #fff;
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
+.modal-copy {
+  margin: 0 0 18px;
+  color: #4e5d6c;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .dashboard-list {

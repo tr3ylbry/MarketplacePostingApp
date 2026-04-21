@@ -50,7 +50,7 @@ export function MarketplacePicker({
       <div className="panel-header">
         <div>
           <p className="panel-kicker">Create Listing</p>
-          <h2>Where Are We Posting This Item Today?</h2>
+          <h2>Where are we posting this item today?</h2>
         </div>
       </div>
 

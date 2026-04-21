@@ -8,13 +8,17 @@ import {
 import type { ListingPhotoUpload } from "../types";
 
 interface ListingFormProps {
+  hasSavedListings: boolean;
   mode: "create" | "edit";
   listing: Listing | null;
   photos: ListingPhotoUpload[];
   initialSelectedPlatforms: PlatformSiteKey[];
   onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
+  onCreateAndExit: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
   onUpdate: (listingId: string, input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
   onDelete: (listingId: string) => void;
+  onExitToHome: () => void;
+  onOpenManage: () => void;
   onStartCreate: () => void;
 }
 
@@ -126,13 +130,17 @@ function RequiredLabel({
 }
 
 export function ListingForm({
+  hasSavedListings,
   mode,
   listing,
   photos: selectedListingPhotos,
   initialSelectedPlatforms,
   onCreate,
+  onCreateAndExit,
   onUpdate,
   onDelete,
+  onExitToHome,
+  onOpenManage,
   onStartCreate,
 }: ListingFormProps) {
   const [form, setForm] = useState<CreateListingInput>(
@@ -143,6 +151,7 @@ export function ListingForm({
   const [orderedPhotoIds, setOrderedPhotoIds] = useState<string[]>([]);
   const [showPhotoOrdering, setShowPhotoOrdering] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [showExitModal, setShowExitModal] = useState(false);
 
   useEffect(() => {
     setForm(buildInitialState(mode === "edit" ? listing : null, initialSelectedPlatforms));
@@ -151,6 +160,7 @@ export function ListingForm({
     setShowPhotoOrdering(false);
     setPhotoError(null);
     setSubmitAttempted(false);
+    setShowExitModal(false);
   }, [initialSelectedPlatforms, listing, mode, selectedListingPhotos]);
 
   const orderedPhotos = useMemo(() => {
@@ -265,6 +275,27 @@ export function ListingForm({
     onCreate(nextInput, orderedPhotos);
   }
 
+  function handleExitClick() {
+    setShowExitModal(true);
+  }
+
+  function handleExitWithoutSaving() {
+    setShowExitModal(false);
+    onExitToHome();
+  }
+
+  function handleSaveAndExit() {
+    setSubmitAttempted(true);
+
+    if (validationErrors.length > 0) {
+      setShowExitModal(false);
+      return;
+    }
+
+    onCreateAndExit(nextInput, orderedPhotos);
+    setShowExitModal(false);
+  }
+
   const displayImageNames =
     orderedPhotos.length > 0 ? orderedPhotos.map((photo) => photo.name) : form.imageNames;
 
@@ -277,6 +308,23 @@ export function ListingForm({
             <h2>{mode === "edit" ? "Update Listing" : "Create Listing"}</h2>
           </div>
           <div className="preview-actions">
+            {mode === "create" ? (
+              <>
+                {hasSavedListings ? (
+                  <button className="secondary-button" onClick={onOpenManage} type="button">
+                    Edit Listings
+                  </button>
+                ) : null}
+                <button className="secondary-button" onClick={handleExitClick} type="button">
+                  Exit To Home
+                </button>
+              </>
+            ) : null}
+            {mode === "edit" ? (
+              <button className="secondary-button" onClick={handleExitClick} type="button">
+                Exit To Home
+              </button>
+            ) : null}
             {mode === "edit" ? (
               <button className="secondary-button" onClick={onStartCreate} type="button">
                 Create A Listing
@@ -793,6 +841,43 @@ export function ListingForm({
             </ul>
           </div>
         </aside>
+      ) : null}
+
+      {showExitModal ? (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            aria-labelledby="exit-create-title"
+            aria-modal="true"
+            className="modal-card"
+            role="dialog"
+          >
+            <p className="panel-kicker">Exit Create Listing</p>
+            <h2 id="exit-create-title">Save Before Leaving?</h2>
+            <p className="modal-copy">
+              You can save this listing before returning to the home page, or leave
+              without saving.
+            </p>
+            <div className="modal-actions">
+              <button className="primary-button" onClick={handleSaveAndExit} type="button">
+                Save And Exit
+              </button>
+              <button
+                className="secondary-button"
+                onClick={handleExitWithoutSaving}
+                type="button"
+              >
+                Exit Without Saving
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => setShowExitModal(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );

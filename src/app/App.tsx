@@ -39,6 +39,11 @@ export default function App() {
     setView("edit");
   }
 
+  function handleCreateListingAndExit(...args: Parameters<typeof createListing>) {
+    createListing(...args);
+    setView("home");
+  }
+
   function handleUpdateListing(...args: Parameters<typeof updateListing>) {
     updateListing(...args);
     setView("edit");
@@ -88,11 +93,15 @@ export default function App() {
     return (
       <section className="workspace">
         <ListingForm
+          hasSavedListings={listings.length > 0}
           initialSelectedPlatforms={draftPlatforms}
           listing={null}
           mode="create"
           onCreate={handleCreateListing}
+          onCreateAndExit={handleCreateListingAndExit}
           onDelete={handleDeleteListing}
+          onExitToHome={() => setView("home")}
+          onOpenManage={() => setView("manage")}
           onStartCreate={startCreateFlow}
           onUpdate={handleUpdateListing}
           photos={[]}
@@ -106,11 +115,15 @@ export default function App() {
     return (
       <section className="workspace">
         <ListingForm
+          hasSavedListings={listings.length > 0}
           initialSelectedPlatforms={selectedListing?.selectedPlatforms ?? []}
           listing={selectedListing}
           mode="edit"
           onCreate={handleCreateListing}
+          onCreateAndExit={handleCreateListingAndExit}
           onDelete={handleDeleteListing}
+          onExitToHome={() => setView("home")}
+          onOpenManage={() => setView("manage")}
           onStartCreate={startCreateFlow}
           onUpdate={handleUpdateListing}
           photos={selectedListingPhotos}
@@ -149,7 +162,7 @@ export default function App() {
     <main className="app-shell">
       <section className="hero">
         <p className="eyebrow">Marketplace Posting Assistant</p>
-        <h1>Create once, tailor per marketplace, track what is live.</h1>
+        <h1>Create once.<br />Tailor per marketplace.<br />Track what's live.</h1>
         <p className="hero-copy">
           This V1 keeps everything local. Choose where an item is going, build one
           listing, and keep your posting workflow organized.
