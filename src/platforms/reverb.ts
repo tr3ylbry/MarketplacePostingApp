@@ -1,4 +1,5 @@
 import type { Listing } from "../domain/listing";
+import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
 
@@ -8,6 +9,7 @@ export const reverbAdapter: PlatformAdapter = {
   key: "reverb",
   label: "Reverb",
   formatListing(listing: Listing) {
+    const suggestedCategories = getSuggestedCategories(listing);
     const notes: string[] = [];
 
     if (!listing.brand) {
@@ -16,10 +18,6 @@ export const reverbAdapter: PlatformAdapter = {
 
     if (!listing.model) {
       notes.push("Model is required for Reverb.");
-    }
-
-    if (!listing.reverbCategory) {
-      notes.push("Category is required for Reverb.");
     }
 
     if (!listing.title) {
@@ -47,17 +45,25 @@ export const reverbAdapter: PlatformAdapter = {
         { key: "finish", label: "Finish", value: listing.finish },
         {
           key: "manufacturerCountry",
-          label: "Manufacturer's country",
+          label: "Manufacturer's Country",
           value: listing.manufacturerCountry,
         },
-        { key: "category", label: "Category (Reverb)", value: listing.reverbCategory },
-        { key: "subcategory", label: "Subcategory (Reverb)", value: listing.reverbSubcategory },
+        {
+          key: "category",
+          label: "Category (Reverb)",
+          value: suggestedCategories.reverbCategory,
+        },
+        {
+          key: "subcategory",
+          label: "Subcategory (Reverb)",
+          value: suggestedCategories.reverbSubcategory,
+        },
         {
           key: "additionalSubcategory",
-          label: "Additional subcategory (Reverb)",
-          value: listing.reverbAdditionalSubcategory,
+          label: "Additional Subcategory (Reverb)",
+          value: suggestedCategories.reverbAdditionalSubcategory,
         },
-        { key: "title", label: "Listing title", value: listing.title },
+        { key: "title", label: "Listing Title", value: listing.title },
         {
           key: "description",
           label: "Description",
@@ -66,22 +72,22 @@ export const reverbAdapter: PlatformAdapter = {
         },
         {
           key: "youtubeLink",
-          label: "Link to a YouTube video",
+          label: "Link to a YouTube Video",
           value: listing.youtubeLink,
         },
         {
           key: "price",
-          label: "Listing price",
+          label: "Listing Price",
           value: listing.price > 0 ? listing.price.toFixed(2) : "",
         },
         {
           key: "purchasePrice",
-          label: "What you paid for the item",
+          label: "What You Paid for the Item",
           value: listing.purchasePrice,
         },
         {
           key: "shippingRate",
-          label: "Shipping rate",
+          label: "Shipping Rate",
           value: listing.shippingRate,
         },
       ],
@@ -93,7 +99,7 @@ export const reverbAdapter: PlatformAdapter = {
           imageNames: listing.imageNames.slice(0, REVERB_TARGET.limit),
         },
       ],
-      notes,
+      notes: [...notes, "Category values are scaffolded suggestions from the listing copy."],
     };
   },
 };

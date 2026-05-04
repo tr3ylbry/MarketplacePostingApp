@@ -7,6 +7,7 @@ import { PlatformPreview } from "../features/listings/components/PlatformPreview
 import { useListings } from "../features/listings/hooks/useListings";
 
 type AppView = "home" | "select-platforms" | "create" | "manage" | "edit";
+type ComposerStep = "form" | "preview";
 
 export default function App() {
   const {
@@ -19,10 +20,12 @@ export default function App() {
     selectListing,
   } = useListings();
   const [view, setView] = useState<AppView>("home");
+  const [composerStep, setComposerStep] = useState<ComposerStep>("form");
   const [draftPlatforms, setDraftPlatforms] = useState<PlatformSiteKey[]>([]);
 
   function startCreateFlow() {
     setDraftPlatforms([]);
+    setComposerStep("form");
     setView("select-platforms");
   }
 
@@ -36,16 +39,19 @@ export default function App() {
 
   function handleCreateListing(...args: Parameters<typeof createListing>) {
     createListing(...args);
+    setComposerStep("form");
     setView("edit");
   }
 
   function handleCreateListingAndExit(...args: Parameters<typeof createListing>) {
     createListing(...args);
+    setComposerStep("form");
     setView("home");
   }
 
   function handleUpdateListing(...args: Parameters<typeof updateListing>) {
     updateListing(...args);
+    setComposerStep("form");
     setView("edit");
   }
 
@@ -60,6 +66,7 @@ export default function App() {
 
   function handleEditListing(listingId: string) {
     selectListing(listingId);
+    setComposerStep("form");
     setView("edit");
   }
 
@@ -80,7 +87,7 @@ export default function App() {
               type="button"
             >
               <p className="panel-kicker">Manage</p>
-              <h2>Edit/Delete Listings</h2>
+              <h2>Edit & Delete Listings</h2>
               <p>Open saved listings to edit them or remove them with confirmation.</p>
             </button>
           ) : null}
@@ -90,8 +97,20 @@ export default function App() {
   }
 
   function renderCreateFlow() {
+    if (composerStep === "preview") {
+      return (
+        <section className="panel-stack">
+          <PlatformPreview
+            listing={selectedListing}
+            onBack={() => setComposerStep("form")}
+            photos={selectedListingPhotos}
+          />
+        </section>
+      );
+    }
+
     return (
-      <section className="workspace">
+      <section className="panel-stack">
         <ListingForm
           hasSavedListings={listings.length > 0}
           initialSelectedPlatforms={draftPlatforms}
@@ -99,6 +118,7 @@ export default function App() {
           mode="create"
           onCreate={handleCreateListing}
           onCreateAndExit={handleCreateListingAndExit}
+          onContinueToPreview={() => setComposerStep("preview")}
           onDelete={handleDeleteListing}
           onExitToHome={() => setView("home")}
           onOpenManage={() => setView("manage")}
@@ -106,14 +126,25 @@ export default function App() {
           onUpdate={handleUpdateListing}
           photos={[]}
         />
-        <PlatformPreview listing={null} photos={[]} />
       </section>
     );
   }
 
   function renderEditFlow() {
+    if (composerStep === "preview") {
+      return (
+        <section className="panel-stack">
+          <PlatformPreview
+            listing={selectedListing}
+            onBack={() => setComposerStep("form")}
+            photos={selectedListingPhotos}
+          />
+        </section>
+      );
+    }
+
     return (
-      <section className="workspace">
+      <section className="panel-stack">
         <ListingForm
           hasSavedListings={listings.length > 0}
           initialSelectedPlatforms={selectedListing?.selectedPlatforms ?? []}
@@ -121,6 +152,7 @@ export default function App() {
           mode="edit"
           onCreate={handleCreateListing}
           onCreateAndExit={handleCreateListingAndExit}
+          onContinueToPreview={() => setComposerStep("preview")}
           onDelete={handleDeleteListing}
           onExitToHome={() => setView("home")}
           onOpenManage={() => setView("manage")}
@@ -128,7 +160,6 @@ export default function App() {
           onUpdate={handleUpdateListing}
           photos={selectedListingPhotos}
         />
-        <PlatformPreview listing={selectedListing} photos={selectedListingPhotos} />
       </section>
     );
   }
@@ -173,7 +204,10 @@ export default function App() {
 
       {view === "select-platforms" ? (
         <MarketplacePicker
-          onContinue={() => setView("create")}
+          onContinue={() => {
+            setComposerStep("form");
+            setView("create");
+          }}
           onToggle={toggleDraftPlatform}
           selectedPlatforms={draftPlatforms}
         />

@@ -157,30 +157,22 @@ export function validateListingInput(input: CreateListingInput): string[] {
   const textFields: Array<[label: string, value: string]> = [
     ["Brand / Make", input.brand],
     ["Model", input.model],
-    ["Type (OfferUp)", input.type],
-    ["Year (Reverb)", input.year],
-    ["Finish (Reverb)", input.finish],
-    ["Manufacturer country (Reverb)", input.manufacturerCountry],
-    ["Category (eBay)", input.ebayCategory],
-    ["Category (OfferUp)", input.offerupCategory],
-    ["Sub-category (OfferUp)", input.offerupSubcategory],
-    ["Category (Facebook Marketplace)", input.facebookCategory],
-    ["Category (Craigslist)", input.craigslistCategory],
-    ["Category (Reverb)", input.reverbCategory],
-    ["Subcategory (Reverb)", input.reverbSubcategory],
-    ["Additional subcategory (Reverb)", input.reverbAdditionalSubcategory],
+    ["Type", input.type],
+    ["Year", input.year],
+    ["Finish", input.finish],
+    ["Manufacturer country", input.manufacturerCountry],
     ["Title", input.title],
     ["Condition", input.condition],
-    ["YouTube link (Reverb)", input.youtubeLink],
-    ["Purchase price (Reverb)", input.purchasePrice],
-    ["Shipping rate (Reverb)", input.shippingRate],
-    ["City (Craigslist)", input.craigslistCity],
-    ["Zip code (Craigslist)", input.craigslistZipCode],
-    ["Size / dimensions (Craigslist)", input.craigslistSizeDimensions],
-    ["Phone number (Craigslist)", input.craigslistPhoneNumber],
-    ["Contact name (Craigslist)", input.craigslistContactName],
-    ["Street (Craigslist)", input.craigslistStreet],
-    ["Cross street (Craigslist)", input.craigslistCrossStreet],
+    ["YouTube link", input.youtubeLink],
+    ["Purchase price", input.purchasePrice],
+    ["Shipping rate", input.shippingRate],
+    ["City", input.craigslistCity],
+    ["Zip code", input.craigslistZipCode],
+    ["Size / dimensions", input.craigslistSizeDimensions],
+    ["Phone number", input.craigslistPhoneNumber],
+    ["Contact name", input.craigslistContactName],
+    ["Street", input.craigslistStreet],
+    ["Cross street", input.craigslistCrossStreet],
   ];
 
   if (input.selectedPlatforms.length === 0) {
@@ -199,22 +191,6 @@ export function validateListingInput(input: CreateListingInput): string[] {
     errors.push("Price must be greater than 0.");
   }
 
-  if (usesEbay && input.ebayCategory.trim().length === 0) {
-    errors.push("Category (eBay) is required.");
-  }
-
-  if (usesOfferUp && input.offerupCategory.trim().length === 0) {
-    errors.push("Category (OfferUp) is required.");
-  }
-
-  if (usesOfferUp && input.offerupSubcategory.trim().length === 0) {
-    errors.push("Sub-category (OfferUp) is required.");
-  }
-
-  if (usesFacebook && input.facebookCategory.trim().length === 0) {
-    errors.push("Category (Facebook Marketplace) is required.");
-  }
-
   if (usesReverb && input.model.trim().length === 0) {
     errors.push("Model is required for Reverb.");
   }
@@ -223,16 +199,8 @@ export function validateListingInput(input: CreateListingInput): string[] {
     errors.push("Brand / Make is required for Reverb.");
   }
 
-  if (usesReverb && input.reverbCategory.trim().length === 0) {
-    errors.push("Category (Reverb) is required.");
-  }
-
   if (usesReverb && input.shippingRate.trim().length === 0) {
     errors.push("Shipping rate is required for Reverb.");
-  }
-
-  if (usesCraigslist && input.craigslistCategory.trim().length === 0) {
-    errors.push("Category (Craigslist) is required.");
   }
 
   if (usesCraigslist && input.craigslistCity.trim().length === 0) {

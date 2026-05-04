@@ -44,7 +44,7 @@ describe("offerupFacebookAdapter", () => {
       "Price",
       "Category (OfferUp)",
       "Category (Facebook Marketplace)",
-      "Sub-category (OfferUp)",
+      "Sub-Category (OfferUp)",
       "Condition",
       "Brand (OfferUp)",
       "Type (OfferUp)",
@@ -64,5 +64,8 @@ describe("offerupFacebookAdapter", () => {
         imageNames: Array.from({ length: 10 }, (_, index) => `photo-${index + 1}.jpg`),
       },
     ]);
+    expect(formatted.notes).toContain(
+      "Category values are scaffolded suggestions from the listing copy.",
+    );
   });
 });

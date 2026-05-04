@@ -1,4 +1,5 @@
 import type { Listing } from "../domain/listing";
+import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
 
@@ -8,11 +9,8 @@ export const craigslistAdapter: PlatformAdapter = {
   key: "craigslist",
   label: "Craigslist",
   formatListing(listing: Listing) {
+    const suggestedCategories = getSuggestedCategories(listing);
     const notes: string[] = [];
-
-    if (!listing.craigslistCategory) {
-      notes.push("Category is required for Craigslist.");
-    }
 
     if (!listing.title) {
       notes.push("Posting title is required for Craigslist.");
@@ -57,43 +55,47 @@ export const craigslistAdapter: PlatformAdapter = {
     return {
       platform: "Craigslist",
       fields: [
-        { key: "category", label: "Category (Craigslist)", value: listing.craigslistCategory },
-        { key: "title", label: "Posting title", value: listing.title },
+        {
+          key: "category",
+          label: "Category (Craigslist)",
+          value: suggestedCategories.craigslistCategory,
+        },
+        { key: "title", label: "Posting Title", value: listing.title },
         { key: "price", label: "Price", value: listing.price > 0 ? listing.price.toFixed(2) : "" },
         {
           key: "craigslistCity",
           label: "City (Craigslist)",
           value: listing.craigslistCity,
         },
-        { key: "craigslistZipCode", label: "Zip code (Craigslist)", value: listing.craigslistZipCode },
+        { key: "craigslistZipCode", label: "Zip Code (Craigslist)", value: listing.craigslistZipCode },
         {
           key: "description",
           label: "Description",
           value: listing.description,
           multiline: true,
         },
-        { key: "brand", label: "Make / manufacturer (Craigslist)", value: listing.brand },
-        { key: "model", label: "Model name / number", value: listing.model },
+        { key: "brand", label: "Make / Manufacturer (Craigslist)", value: listing.brand },
+        { key: "model", label: "Model Name / Number", value: listing.model },
         {
           key: "craigslistSizeDimensions",
-          label: "Size / dimensions (Craigslist)",
+          label: "Size / Dimensions (Craigslist)",
           value: listing.craigslistSizeDimensions,
         },
         { key: "condition", label: "Condition", value: listing.condition },
         {
           key: "craigslistPhoneNumber",
-          label: "Phone number (Craigslist)",
+          label: "Phone Number (Craigslist)",
           value: listing.craigslistPhoneNumber,
         },
         {
           key: "craigslistContactName",
-          label: "Contact name (Craigslist)",
+          label: "Contact Name (Craigslist)",
           value: listing.craigslistContactName,
         },
         { key: "craigslistStreet", label: "Street (Craigslist)", value: listing.craigslistStreet },
         {
           key: "craigslistCrossStreet",
-          label: "Cross street (Craigslist)",
+          label: "Cross Street (Craigslist)",
           value: listing.craigslistCrossStreet,
         },
       ],
@@ -105,7 +107,7 @@ export const craigslistAdapter: PlatformAdapter = {
           imageNames: listing.imageNames.slice(0, CRAIGSLIST_TARGET.limit),
         },
       ],
-      notes,
+      notes: [...notes, "Category is currently a scaffolded suggestion from the listing copy."],
     };
   },
 };

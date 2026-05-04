@@ -1,4 +1,5 @@
 import type { Listing } from "../domain/listing";
+import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
 
@@ -11,6 +12,7 @@ export const offerupFacebookAdapter: PlatformAdapter = {
   key: "offerup-facebook",
   label: "OfferUp / Facebook Marketplace",
   formatListing(listing: Listing) {
+    const suggestedCategories = getSuggestedCategories(listing);
     const notes: string[] = [];
     const usesOfferUp = listing.selectedPlatforms.includes("offerup");
     const usesFacebook = listing.selectedPlatforms.includes("facebook-marketplace");
@@ -27,14 +29,6 @@ export const offerupFacebookAdapter: PlatformAdapter = {
 
     if (!listing.description) {
       notes.push(`Description is required for ${platformLabel}.`);
-    }
-
-    if (usesOfferUp && !listing.offerupCategory) {
-      notes.push("Category is required for OfferUp.");
-    }
-
-    if (usesFacebook && !listing.facebookCategory) {
-      notes.push("Category is required for Facebook Marketplace.");
     }
 
     if (!listing.condition) {
@@ -55,29 +49,35 @@ export const offerupFacebookAdapter: PlatformAdapter = {
               {
                 key: "offerupCategory",
                 label: "Category (OfferUp)",
-                value: listing.offerupCategory,
+                value: suggestedCategories.offerupCategory,
               },
               {
                 key: "facebookCategory",
                 label: "Category (Facebook Marketplace)",
-                value: listing.facebookCategory,
+                value: suggestedCategories.facebookCategory,
               },
             ]
           : usesOfferUp
-            ? [{ key: "offerupCategory", label: "Category", value: listing.offerupCategory }]
+            ? [
+                {
+                  key: "offerupCategory",
+                  label: "Category",
+                  value: suggestedCategories.offerupCategory,
+                },
+              ]
             : [
                 {
                   key: "facebookCategory",
                   label: "Category",
-                  value: listing.facebookCategory,
+                  value: suggestedCategories.facebookCategory,
                 },
               ]),
         ...(usesOfferUp
           ? [
               {
                 key: "offerupSubcategory",
-                label: "Sub-category (OfferUp)",
-                value: listing.offerupSubcategory,
+                label: "Sub-Category (OfferUp)",
+                value: suggestedCategories.offerupSubcategory,
               },
             ]
           : []),
@@ -117,7 +117,7 @@ export const offerupFacebookAdapter: PlatformAdapter = {
             ]
           : []),
       ],
-      notes,
+      notes: [...notes, "Category values are scaffolded suggestions from the listing copy."],
     };
   },
 };

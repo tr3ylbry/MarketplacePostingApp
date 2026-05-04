@@ -11,6 +11,7 @@ import {
 
 interface PlatformPreviewProps {
   listing: Listing | null;
+  onBack?: () => void;
   photos: ListingPhotoUpload[];
 }
 
@@ -21,7 +22,7 @@ const adapters = [
   reverbAdapter,
 ];
 
-export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
+export function PlatformPreview({ listing, onBack, photos }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
   const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
@@ -119,16 +120,23 @@ export function PlatformPreview({ listing, photos }: PlatformPreviewProps) {
           <p className="panel-kicker">Adapter Output</p>
           <h2>{formatted.platform} preview</h2>
         </div>
-        <div className="preview-nav">
-          <button className="secondary-button" onClick={showPreviousPreview} type="button">
-            ←
-          </button>
-          <span className="summary-pill">
-            {clampedAdapterIndex + 1} / {filteredAdapters.length}
-          </span>
-          <button className="secondary-button" onClick={showNextPreview} type="button">
-            →
-          </button>
+        <div className="preview-header-actions">
+          {onBack ? (
+            <button className="secondary-button" onClick={onBack} type="button">
+              ← Back To General Listing
+            </button>
+          ) : null}
+          <div className="preview-nav">
+            <button className="secondary-button" onClick={showPreviousPreview} type="button">
+              ←
+            </button>
+            <span className="summary-pill">
+              {clampedAdapterIndex + 1} / {filteredAdapters.length}
+            </span>
+            <button className="secondary-button" onClick={showNextPreview} type="button">
+              →
+            </button>
+          </div>
         </div>
       </div>
 

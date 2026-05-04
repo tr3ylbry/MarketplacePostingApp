@@ -86,7 +86,6 @@ describe("listing domain", () => {
       "Title must be at least 4 characters.",
       "Description must be at least 20 characters.",
       "Price must be greater than 0.",
-      "Category (Craigslist) is required.",
       "City (Craigslist) is required.",
       "Zip code (Craigslist) is required.",
       "Phone number (Craigslist) is required.",

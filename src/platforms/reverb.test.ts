@@ -44,18 +44,20 @@ describe("reverbAdapter", () => {
       "Model",
       "Year",
       "Finish",
-      "Manufacturer's country",
+      "Manufacturer's Country",
       "Category (Reverb)",
       "Subcategory (Reverb)",
-      "Additional subcategory (Reverb)",
-      "Listing title",
+      "Additional Subcategory (Reverb)",
+      "Listing Title",
       "Description",
-      "Link to a YouTube video",
-      "Listing price",
-      "What you paid for the item",
-      "Shipping rate",
+      "Link to a YouTube Video",
+      "Listing Price",
+      "What You Paid for the Item",
+      "Shipping Rate",
     ]);
     expect(formatted.photoSets[0].imageNames).toEqual(["front.jpg"]);
-    expect(formatted.notes).toEqual([]);
+    expect(formatted.notes).toContain(
+      "Category values are scaffolded suggestions from the listing copy.",
+    );
   });
 });

@@ -11,6 +11,7 @@ interface ListingFormProps {
   hasSavedListings: boolean;
   mode: "create" | "edit";
   listing: Listing | null;
+  onContinueToPreview: () => void;
   photos: ListingPhotoUpload[];
   initialSelectedPlatforms: PlatformSiteKey[];
   onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
@@ -45,13 +46,13 @@ const emptyState: CreateListingInput = {
   youtubeLink: "",
   purchasePrice: "",
   shippingRate: "",
-  craigslistCity: "",
+  craigslistCity: "Tucson",
   craigslistZipCode: "",
   craigslistSizeDimensions: "",
-  craigslistPhoneNumber: "",
-  craigslistContactName: "",
-  craigslistStreet: "",
-  craigslistCrossStreet: "",
+  craigslistPhoneNumber: "5855078535",
+  craigslistContactName: "Trey",
+  craigslistStreet: "Bermuda",
+  craigslistCrossStreet: "Country Club and Glenn",
   imageNames: [],
 };
 
@@ -100,18 +101,75 @@ function buildInitialState(
   };
 }
 
-function formatCurrencyDigits(value: string) {
-  const digits = value.replace(/\D/g, "");
+function normalizeCurrencyInput(value: string) {
+  const trimmed = value.trim();
 
-  if (!digits) {
+  if (!trimmed) {
     return "";
   }
 
-  return (Number(digits) / 100).toFixed(2);
+  const normalized = trimmed.replace(/[^0-9.]/g, "");
+
+  if (!normalized) {
+    return "";
+  }
+
+  if (!normalized.includes(".")) {
+    const wholeDollars = Number(normalized);
+    return Number.isFinite(wholeDollars) ? `${wholeDollars.toFixed(2)}` : "";
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : "";
 }
 
-function parseCurrencyValue(value: string) {
-  return value ? Number(value) : 0;
+const lowercaseWords = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "for",
+  "in",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+]);
+
+const wordOverrides: Record<string, string> = {
+  ebay: "eBay",
+  facebook: "Facebook",
+  youtube: "YouTube",
+};
+
+function formatLabelText(label: string) {
+  return label
+    .split(" ")
+    .map((word, wordIndex) =>
+      word
+        .split("-")
+        .map((segment, segmentIndex) => {
+          const normalized = segment.toLowerCase();
+
+          if (wordOverrides[normalized]) {
+            return wordOverrides[normalized];
+          }
+
+          if (!normalized) {
+            return segment;
+          }
+
+          if (wordIndex > 0 && segmentIndex === 0 && lowercaseWords.has(normalized)) {
+            return normalized;
+          }
+
+          return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+        })
+        .join("-"),
+    )
+    .join(" ");
 }
 
 function RequiredLabel({
@@ -123,7 +181,7 @@ function RequiredLabel({
 }) {
   return (
     <span className="field-label">
-      {label}
+      {formatLabelText(label)}
       {required ? <span className="required-indicator">*</span> : null}
     </span>
   );
@@ -133,6 +191,7 @@ export function ListingForm({
   hasSavedListings,
   mode,
   listing,
+  onContinueToPreview,
   photos: selectedListingPhotos,
   initialSelectedPlatforms,
   onCreate,
@@ -152,6 +211,8 @@ export function ListingForm({
   const [showPhotoOrdering, setShowPhotoOrdering] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
+  const [hasSavedDraft, setHasSavedDraft] = useState(mode === "edit" && Boolean(listing));
+  const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
     setForm(buildInitialState(mode === "edit" ? listing : null, initialSelectedPlatforms));
@@ -161,6 +222,8 @@ export function ListingForm({
     setPhotoError(null);
     setSubmitAttempted(false);
     setShowExitModal(false);
+    setHasSavedDraft(mode === "edit" && Boolean(listing));
+    setIsDirty(false);
   }, [initialSelectedPlatforms, listing, mode, selectedListingPhotos]);
 
   const orderedPhotos = useMemo(() => {
@@ -210,15 +273,25 @@ export function ListingForm({
     field: Key,
     value: CreateListingInput[Key],
   ) {
+    setIsDirty(true);
     setForm((current) => ({ ...current, [field]: value }));
   }
 
   function updateMoneyStringField<Key extends keyof CreateListingInput>(field: Key, value: string) {
-    updateField(field, formatCurrencyDigits(value) as CreateListingInput[Key]);
+    updateField(field, value as CreateListingInput[Key]);
   }
 
   function handlePriceChange(value: string) {
-    updateField("price", parseCurrencyValue(formatCurrencyDigits(value)));
+    updateField("price", Number(value.replace(/[^0-9.]/g, "")) || 0);
+  }
+
+  function handlePriceBlur(value: string) {
+    const normalized = normalizeCurrencyInput(value);
+    updateField("price", normalized ? Number(normalized) : 0);
+  }
+
+  function handleMoneyBlur<Key extends keyof CreateListingInput>(field: Key, value: string) {
+    updateField(field, normalizeCurrencyInput(value) as CreateListingInput[Key]);
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
@@ -226,6 +299,7 @@ export function ListingForm({
     const nextFiles = files.slice(0, 25);
 
     setPhotoError(files.length > 25 ? "You can upload up to 25 photos." : null);
+    setIsDirty(true);
     setPhotos((current) => {
       for (const photo of current) {
         URL.revokeObjectURL(photo.previewUrl);
@@ -242,12 +316,14 @@ export function ListingForm({
   }
 
   function handlePhotoOrderClick(photoId: string) {
+    setIsDirty(true);
     setOrderedPhotoIds((current) =>
       current.includes(photoId) ? current : [...current, photoId],
     );
   }
 
   function undoPhotoOrder() {
+    setIsDirty(true);
     setOrderedPhotoIds((current) => current.slice(0, -1));
   }
 
@@ -269,10 +345,14 @@ export function ListingForm({
 
     if (mode === "edit" && listing) {
       onUpdate(listing.id, nextInput, orderedPhotos.length > 0 ? orderedPhotos : selectedListingPhotos);
+      setHasSavedDraft(true);
+      setIsDirty(false);
       return;
     }
 
     onCreate(nextInput, orderedPhotos);
+    setHasSavedDraft(true);
+    setIsDirty(false);
   }
 
   function handleExitClick() {
@@ -298,6 +378,8 @@ export function ListingForm({
 
   const displayImageNames =
     orderedPhotos.length > 0 ? orderedPhotos.map((photo) => photo.name) : form.imageNames;
+  const canContinue = hasSavedDraft && !isDirty;
+  const isSaveDisabled = !isDirty || validationErrors.length > 0;
 
   return (
     <>
@@ -312,7 +394,7 @@ export function ListingForm({
               <>
                 {hasSavedListings ? (
                   <button className="secondary-button" onClick={onOpenManage} type="button">
-                    Edit Listings
+                    Edit & Delete
                   </button>
                 ) : null}
                 <button className="secondary-button" onClick={handleExitClick} type="button">
@@ -338,7 +420,7 @@ export function ListingForm({
           </div>
         </div>
 
-        <div className="image-chip-row">
+        <div className="image-chip-row listing-platform-row">
           {selectedPlatformLabels.map((label) => (
             <span className="image-chip" key={label}>
               {label}
@@ -382,9 +464,10 @@ export function ListingForm({
                 <input
                   inputMode="numeric"
                   onChange={(event) => handlePriceChange(event.target.value)}
+                  onBlur={(event) => handlePriceBlur(event.target.value)}
                   placeholder="39.00"
                   type="text"
-                  value={form.price > 0 ? form.price.toFixed(2) : ""}
+                  value={form.price > 0 ? String(form.price) : ""}
                 />
               </label>
 
@@ -407,18 +490,9 @@ export function ListingForm({
               <div className="form-section-header">
                 <h3>eBay Fields</h3>
               </div>
-
-              <div className="field-row">
-                <label>
-                  <RequiredLabel label="Category (eBay)" required />
-                  <input
-                    maxLength={35}
-                    onChange={(event) => updateField("ebayCategory", event.target.value)}
-                    placeholder="Suggested Later"
-                    value={form.ebayCategory}
-                  />
-                </label>
-              </div>
+              <p className="section-helper">
+                Category will be suggested automatically in the eBay preview.
+              </p>
             </section>
           ) : null}
 
@@ -434,46 +508,15 @@ export function ListingForm({
                 </h3>
               </div>
 
-              <div className="field-row">
-                {usesOfferUp ? (
-                  <label>
-                    <RequiredLabel label="Category (OfferUp)" required />
-                    <input
-                      maxLength={35}
-                      onChange={(event) => updateField("offerupCategory", event.target.value)}
-                      placeholder="Suggested Later"
-                      value={form.offerupCategory}
-                    />
-                  </label>
-                ) : null}
-
-                {usesFacebook ? (
-                  <label>
-                    <RequiredLabel label="Category (Facebook Marketplace)" required />
-                    <input
-                      maxLength={35}
-                      onChange={(event) => updateField("facebookCategory", event.target.value)}
-                      placeholder="Suggested Later"
-                      value={form.facebookCategory}
-                    />
-                  </label>
-                ) : null}
-              </div>
+              <p className="section-helper">
+                Category suggestions for these previews will be generated from the
+                listing title and description.
+              </p>
 
               {usesOfferUp ? (
                 <div className="field-row">
                   <label>
-                    <RequiredLabel label="Sub-category (OfferUp)" required />
-                    <input
-                      maxLength={35}
-                      onChange={(event) => updateField("offerupSubcategory", event.target.value)}
-                      placeholder="Suggested Later"
-                      value={form.offerupSubcategory}
-                    />
-                  </label>
-
-                  <label>
-                    <RequiredLabel label="Brand (OfferUp)" />
+                    <RequiredLabel label="Brand" />
                     <input
                       maxLength={35}
                       onChange={(event) => updateField("brand", event.target.value)}
@@ -483,7 +526,7 @@ export function ListingForm({
                   </label>
 
                   <label>
-                    <RequiredLabel label="Type (OfferUp)" />
+                    <RequiredLabel label="Type" />
                     <input
                       maxLength={35}
                       onChange={(event) => updateField("type", event.target.value)}
@@ -502,19 +545,13 @@ export function ListingForm({
                 <h3>Craigslist Fields</h3>
               </div>
 
+              <p className="section-helper">
+                Craigslist category will be suggested automatically in the preview.
+              </p>
+
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="Category (Craigslist)" required />
-                  <input
-                    maxLength={35}
-                    onChange={(event) => updateField("craigslistCategory", event.target.value)}
-                    placeholder="Suggested Later"
-                    value={form.craigslistCategory}
-                  />
-                </label>
-
-                <label>
-                  <RequiredLabel label="Make / Manufacturer (Craigslist)" required />
+                  <RequiredLabel label="Make / Manufacturer" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("brand", event.target.value)}
@@ -524,7 +561,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Model Name / Number (Craigslist)" required />
+                  <RequiredLabel label="Model Name / Number" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("model", event.target.value)}
@@ -536,7 +573,7 @@ export function ListingForm({
 
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="City (Craigslist)" required />
+                  <RequiredLabel label="City" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistCity", event.target.value)}
@@ -546,7 +583,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Zip Code (Craigslist)" required />
+                  <RequiredLabel label="Zip Code" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistZipCode", event.target.value)}
@@ -556,7 +593,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Contact Name (Craigslist)" required />
+                  <RequiredLabel label="Contact Name" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistContactName", event.target.value)}
@@ -568,7 +605,7 @@ export function ListingForm({
 
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="Phone Number (Craigslist)" required />
+                  <RequiredLabel label="Phone Number" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistPhoneNumber", event.target.value)}
@@ -578,7 +615,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Size / Dimensions (Craigslist)" />
+                  <RequiredLabel label="Size / Dimensions" />
                   <input
                     maxLength={35}
                     onChange={(event) =>
@@ -590,7 +627,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Street (Craigslist)" />
+                  <RequiredLabel label="Street" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistStreet", event.target.value)}
@@ -602,7 +639,7 @@ export function ListingForm({
 
               <div className="field-row single">
                 <label>
-                  <RequiredLabel label="Cross Street (Craigslist)" />
+                  <RequiredLabel label="Cross Street" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("craigslistCrossStreet", event.target.value)}
@@ -620,9 +657,13 @@ export function ListingForm({
                 <h3>Reverb Fields</h3>
               </div>
 
+              <p className="section-helper">
+                Reverb categories will be suggested automatically in the preview.
+              </p>
+
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="Brand (Reverb)" required />
+                  <RequiredLabel label="Brand" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("brand", event.target.value)}
@@ -632,7 +673,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Model (Reverb)" required />
+                  <RequiredLabel label="Model" required />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("model", event.target.value)}
@@ -640,46 +681,15 @@ export function ListingForm({
                     value={form.model}
                   />
                 </label>
-
-                <label>
-                  <RequiredLabel label="Category (Reverb)" required />
-                  <input
-                    maxLength={35}
-                    onChange={(event) => updateField("reverbCategory", event.target.value)}
-                    placeholder="Suggested Later"
-                    value={form.reverbCategory}
-                  />
-                </label>
               </div>
 
-              <div className="field-row">
+              <div className="field-row single">
                 <label>
-                  <RequiredLabel label="Subcategory (Reverb)" />
-                  <input
-                    maxLength={35}
-                    onChange={(event) => updateField("reverbSubcategory", event.target.value)}
-                    placeholder="Electric Guitars"
-                    value={form.reverbSubcategory}
-                  />
-                </label>
-
-                <label>
-                  <RequiredLabel label="Additional Subcategory (Reverb)" />
-                  <input
-                    maxLength={35}
-                    onChange={(event) =>
-                      updateField("reverbAdditionalSubcategory", event.target.value)
-                    }
-                    placeholder="Solid Body"
-                    value={form.reverbAdditionalSubcategory}
-                  />
-                </label>
-
-                <label>
-                  <RequiredLabel label="Shipping Rate (Reverb)" required />
+                  <RequiredLabel label="Shipping Rate" required />
                   <input
                     inputMode="numeric"
                     onChange={(event) => updateMoneyStringField("shippingRate", event.target.value)}
+                    onBlur={(event) => handleMoneyBlur("shippingRate", event.target.value)}
                     placeholder="49.99"
                     type="text"
                     value={form.shippingRate}
@@ -689,7 +699,7 @@ export function ListingForm({
 
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="Year (Reverb)" />
+                  <RequiredLabel label="Year" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("year", event.target.value)}
@@ -699,7 +709,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Finish (Reverb)" />
+                  <RequiredLabel label="Finish" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("finish", event.target.value)}
@@ -709,7 +719,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="Manufacturer's Country (Reverb)" />
+                  <RequiredLabel label="Manufacturer's Country" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("manufacturerCountry", event.target.value)}
@@ -721,12 +731,13 @@ export function ListingForm({
 
               <div className="field-row">
                 <label>
-                  <RequiredLabel label="What You Paid (Reverb)" />
+                  <RequiredLabel label="What You Paid" />
                   <input
                     inputMode="numeric"
                     onChange={(event) =>
                       updateMoneyStringField("purchasePrice", event.target.value)
                     }
+                    onBlur={(event) => handleMoneyBlur("purchasePrice", event.target.value)}
                     placeholder="850.00"
                     type="text"
                     value={form.purchasePrice}
@@ -734,7 +745,7 @@ export function ListingForm({
                 </label>
 
                 <label>
-                  <RequiredLabel label="YouTube Link (Reverb)" />
+                  <RequiredLabel label="YouTube Link" />
                   <input
                     maxLength={35}
                     onChange={(event) => updateField("youtubeLink", event.target.value)}
@@ -823,9 +834,20 @@ export function ListingForm({
             {photoError ? <p className="photo-error">{photoError}</p> : null}
           </section>
 
-          <button className="primary-button" type="submit">
-            {mode === "edit" ? "Save Changes" : "Save Listing"}
-          </button>
+          <div className="form-footer-actions">
+            <button className="primary-button" disabled={isSaveDisabled} type="submit">
+              {mode === "edit" ? "Save Changes" : "Save Listing"}
+            </button>
+            {canContinue ? (
+              <button
+                className="secondary-button continue-button"
+                onClick={onContinueToPreview}
+                type="button"
+              >
+                Continue
+              </button>
+            ) : null}
+          </div>
         </form>
       </section>
 

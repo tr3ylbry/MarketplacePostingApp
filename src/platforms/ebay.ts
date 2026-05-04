@@ -1,4 +1,5 @@
 import type { Listing } from "../domain/listing";
+import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
 import type { PlatformAdapter } from "./types";
 
@@ -17,6 +18,7 @@ export const ebayAdapter: PlatformAdapter = {
   key: "ebay",
   label: "eBay",
   formatListing(listing: Listing) {
+    const suggestedCategories = getSuggestedCategories(listing);
     const conditionLabel = listing.condition.replace(/-/g, " ");
     const title = truncate(listing.title, EBAY_TITLE_LIMIT);
 
@@ -24,7 +26,7 @@ export const ebayAdapter: PlatformAdapter = {
       `${listing.title}`,
       "",
       `Condition: ${conditionLabel}`,
-      `Category: ${listing.ebayCategory}`,
+      `Category: ${suggestedCategories.ebayCategory}`,
       "",
       listing.description.trim(),
       "",
@@ -47,7 +49,7 @@ export const ebayAdapter: PlatformAdapter = {
       fields: [
         { key: "title", label: "Title", value: title },
         { key: "price", label: "Price", value: listing.price.toFixed(2) },
-        { key: "category", label: "Category", value: listing.ebayCategory },
+        { key: "category", label: "Category", value: suggestedCategories.ebayCategory },
         {
           key: "description",
           label: "Description",
@@ -63,7 +65,7 @@ export const ebayAdapter: PlatformAdapter = {
           imageNames: limitedImages,
         },
       ],
-      notes,
+      notes: [...notes, "Category is currently a scaffolded suggestion from the listing copy."],
     };
   },
 };

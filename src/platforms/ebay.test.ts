@@ -47,5 +47,8 @@ describe("ebayAdapter", () => {
     expect(photoSet.imageNames).toHaveLength(24);
     expect(formatted.notes).toContain("Title truncated to 80 characters for eBay.");
     expect(formatted.notes).toContain("Using first 24 images for eBay.");
+    expect(formatted.notes).toContain(
+      "Category is currently a scaffolded suggestion from the listing copy.",
+    );
   });
 });

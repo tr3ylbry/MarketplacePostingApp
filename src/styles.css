@@ -148,6 +148,7 @@ textarea {
   display: grid;
   grid-template-rows: minmax(2.8rem, auto) auto;
   align-content: start;
+  height: 100%;
 }
 
 .listing-form input,
@@ -158,6 +159,7 @@ textarea {
   padding: 12px 14px;
   background: #fff;
   width: 100%;
+  align-self: start;
 }
 
 .field-row {
@@ -169,6 +171,12 @@ textarea {
 
 .field-row.single {
   grid-template-columns: 1fr;
+}
+
+.section-helper {
+  margin: 0 0 18px;
+  color: #607284;
+  line-height: 1.5;
 }
 
 .form-section {
@@ -188,6 +196,9 @@ textarea {
 
 .field-label {
   display: block;
+  min-height: 2.8rem;
+  display: flex;
+  align-items: end;
   font-size: 0.95rem;
   color: #1f2933;
 }
@@ -239,6 +250,10 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.listing-platform-row {
+  margin: 6px 0 24px;
 }
 
 .marketplace-grid {
@@ -315,6 +330,23 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.preview-header-actions,
+.form-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.form-footer-actions {
+  margin-top: 8px;
+}
+
+.continue-button {
+  border-color: #d4a017;
+  color: #6e5317;
 }
 
 .checkbox-row {

@@ -42,19 +42,22 @@ describe("craigslistAdapter", () => {
     expect(formatted.photoSets[0].imageNames).toHaveLength(24);
     expect(formatted.fields.map((field) => field.label)).toEqual([
       "Category (Craigslist)",
-      "Posting title",
+      "Posting Title",
       "Price",
       "City (Craigslist)",
-      "Zip code (Craigslist)",
+      "Zip Code (Craigslist)",
       "Description",
-      "Make / manufacturer (Craigslist)",
-      "Model name / number",
-      "Size / dimensions (Craigslist)",
+      "Make / Manufacturer (Craigslist)",
+      "Model Name / Number",
+      "Size / Dimensions (Craigslist)",
       "Condition",
-      "Phone number (Craigslist)",
-      "Contact name (Craigslist)",
+      "Phone Number (Craigslist)",
+      "Contact Name (Craigslist)",
       "Street (Craigslist)",
-      "Cross street (Craigslist)",
+      "Cross Street (Craigslist)",
     ]);
+    expect(formatted.notes).toContain(
+      "Category is currently a scaffolded suggestion from the listing copy.",
+    );
   });
 });
