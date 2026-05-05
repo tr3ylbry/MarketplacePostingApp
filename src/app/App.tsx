@@ -103,7 +103,6 @@ export default function App() {
           <PlatformPreview
             listing={selectedListing}
             onBack={() => setComposerStep("form")}
-            photos={selectedListingPhotos}
           />
         </section>
       );
@@ -137,7 +136,6 @@ export default function App() {
           <PlatformPreview
             listing={selectedListing}
             onBack={() => setComposerStep("form")}
-            photos={selectedListingPhotos}
           />
         </section>
       );

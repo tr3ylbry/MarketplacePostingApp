@@ -1,4 +1,4 @@
-import type { Listing } from "../../domain/listing";
+import type { Listing, PlatformSiteKey } from "../../domain/listing";
 import type { ListingPhotoUpload } from "./types";
 import { photoTargets } from "../../platforms/photoTargets";
 
@@ -124,7 +124,10 @@ function buildZip(entries: ZipEntry[]) {
 }
 
 export async function buildListingPhotoBundle(
-  listing: Listing,
+  listing: Pick<Listing, "selectedPlatforms" | "title"> | {
+    selectedPlatforms: PlatformSiteKey[];
+    title: string;
+  },
   photos: ListingPhotoUpload[],
 ) {
   const safeTitle = sanitizeSegment(listing.title);

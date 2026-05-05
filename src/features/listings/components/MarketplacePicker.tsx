@@ -12,15 +12,15 @@ const marketplaceTiles: Array<{
   label: string;
   iconPath: string;
 }> = [
-  { key: "ebay", label: "eBay", iconPath: "/marketplace-icons/ebay.svg" },
-  { key: "offerup", label: "OfferUp", iconPath: "/marketplace-icons/offerup.svg" },
+  { key: "craigslist", label: "Craigslist", iconPath: "/marketplace-icons/craigslist-tile.png" },
+  { key: "ebay", label: "eBay", iconPath: "/marketplace-icons/ebay-tile.png" },
   {
     key: "facebook-marketplace",
     label: "Facebook Marketplace",
-    iconPath: "/marketplace-icons/facebook-marketplace.svg",
+    iconPath: "/marketplace-icons/facebook-marketplace-tile.png",
   },
-  { key: "craigslist", label: "Craigslist", iconPath: "/marketplace-icons/craigslist.svg" },
-  { key: "reverb", label: "Reverb", iconPath: "/marketplace-icons/reverb.svg" },
+  { key: "offerup", label: "OfferUp", iconPath: "/marketplace-icons/offerup-tile.png" },
+  { key: "reverb", label: "Reverb", iconPath: "/marketplace-icons/reverb-tile.png" },
 ];
 
 function MarketplaceIcon({ iconPath, label }: { iconPath: string; label: string }) {

@@ -41,12 +41,23 @@ describe("ebayAdapter", () => {
     const formatted = ebayAdapter.formatListing(listing);
 
     const titleField = formatted.fields.find((field) => field.key === "title");
+    const fieldLabels = formatted.fields.map((field) => field.label);
     const photoSet = formatted.photoSets[0];
 
     expect(titleField?.value.length).toBeLessThanOrEqual(80);
-    expect(photoSet.imageNames).toHaveLength(24);
+    expect(fieldLabels).toEqual([
+      "Item Title",
+      "Category",
+      "Item Condition",
+      "Brand",
+      "Type",
+      "Model",
+      "Price",
+      "Description",
+    ]);
+    expect(photoSet.imageNames).toHaveLength(30);
     expect(formatted.notes).toContain("Title truncated to 80 characters for eBay.");
-    expect(formatted.notes).toContain("Using first 24 images for eBay.");
+    expect(formatted.notes).not.toContain("Using first 40 images for eBay.");
     expect(formatted.notes).toContain(
       "Category is currently a scaffolded suggestion from the listing copy.",
     );

@@ -84,7 +84,7 @@ export interface CreateListingInput {
 }
 
 const MAX_TEXT_FIELD_LENGTH = 35;
-const MAX_IMAGE_COUNT = 25;
+const MAX_IMAGE_COUNT = 40;
 const ALL_PLATFORM_KEYS: PlatformSiteKey[] = [
   "ebay",
   "craigslist",
@@ -220,7 +220,7 @@ export function validateListingInput(input: CreateListingInput): string[] {
   }
 
   if (input.imageNames.length > MAX_IMAGE_COUNT) {
-    errors.push("You can upload up to 25 photos.");
+    errors.push("You can upload up to 40 photos.");
   }
 
   for (const [label, value] of textFields) {

@@ -44,12 +44,28 @@ export const ebayAdapter: PlatformAdapter = {
       notes.push(`Using first ${EBAY_TARGET.limit} images for eBay.`);
     }
 
+    if (!listing.brand) {
+      notes.push("Brand is commonly needed in eBay item specifics.");
+    }
+
+    if (!listing.type) {
+      notes.push("Type is commonly needed in eBay item specifics.");
+    }
+
+    if (!listing.model) {
+      notes.push("Model is commonly needed in eBay item specifics.");
+    }
+
     return {
       platform: "eBay",
       fields: [
-        { key: "title", label: "Title", value: title },
-        { key: "price", label: "Price", value: listing.price.toFixed(2) },
+        { key: "title", label: "Item Title", value: title },
         { key: "category", label: "Category", value: suggestedCategories.ebayCategory },
+        { key: "condition", label: "Item Condition", value: conditionLabel },
+        { key: "brand", label: "Brand", value: listing.brand },
+        { key: "type", label: "Type", value: listing.type },
+        { key: "model", label: "Model", value: listing.model },
+        { key: "price", label: "Price", value: listing.price.toFixed(2) },
         {
           key: "description",
           label: "Description",
