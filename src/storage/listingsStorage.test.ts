@@ -68,6 +68,63 @@ describe("validated local persistence", () => {
     saveListings([]);
     expect(loadListings()).toEqual([]);
   });
+  it.each(["$500", "Free", "   ", "12oops", "1.2.3", "NaN", "Infinity", "-1", "0x10", NaN, null, "9".repeat(400)])(
+    "omits unusable optional money %s without losing the listing",
+    value => {
+      const migrated = migrateListing({ ...legacyFixture(), purchasePrice: value, shippingRate: value });
+      expect(migrated).not.toBeNull();
+      expect(migrated?.id).toBe("old-id");
+      expect(migrated?.askingPrice.amount).toBe(250);
+      expect(migrated?.acquisitionCost).toBeUndefined();
+      expect(migrated?.shippingRate).toBeUndefined();
+    },
+  );
+  it.each([[" 500.25 ", 500.25], ["0", 0], [".50", 0.5], ["500.", 500]] as const)(
+    "preserves clean optional decimal amounts %s",
+    (value, amount) => {
+      const migrated = migrateListing({ ...legacyFixture(), purchasePrice: value, shippingRate: value });
+      expect(migrated?.acquisitionCost).toEqual({ amount, currency: "USD" });
+      expect(migrated?.shippingRate).toEqual({ amount, currency: "USD" });
+    },
+  );
+  it.each([
+    ["eBay", "ebay"], [" EBAY ", "ebay"], ["Reverb", "reverb"],
+    ["Craigslist", "craigslist"], ["OfferUp", "offerup"], ["Offer Up", "offerup"],
+    ["Facebook Marketplace", "facebook-marketplace"],
+    ["facebook-marketplace", "facebook-marketplace"],
+    [" FACEBOOK_MARKETPLACE ", "facebook-marketplace"],
+  ])("normalizes posting platform %s while preserving publication data", (platform, marketplace) => {
+    const record = { platform, url: "https://example.com/item/123", datePosted: "2026-01-01T00:00:00.000Z" };
+    const migrated = migrateListing({ ...legacyFixture(), postingRecords: [record] });
+    expect(migrated?.marketplaceListings).toEqual([{
+      id: "old-id:publication:0", listingId: "old-id", marketplace, status: "published",
+      externalUrl: record.url, publishedAt: record.datePosted,
+    }]);
+  });
+  it("skips unsupported publications without losing the listing or valid records", () => {
+    const valid = { platform: "eBay", url: "https://ebay.com/item/1", datePosted: "2026-01-01T00:00:00.000Z" };
+    const old = { ...legacyFixture(), postingRecords: [{ ...valid, platform: "unknown-marketplace" }, valid] };
+    const migrated = migrateListing(old);
+    expect(migrated?.id).toBe("old-id");
+    expect(migrated?.marketplaceListings).toEqual([{
+      id: "old-id:publication:1", listingId: "old-id", marketplace: "ebay", status: "published",
+      externalUrl: valid.url, publishedAt: valid.datePosted,
+    }]);
+    expect(migrateListing({ ...old, postingRecords: [old.postingRecords[0]] })?.marketplaceListings).toEqual([]);
+  });
+  it("omits an invalid optional publication date while retaining its known marketplace and URL", () => {
+    const migrated = migrateListing({ ...legacyFixture(), postingRecords: [{ platform: "Reverb", url: "https://reverb.com/item/1", datePosted: "unknown" }] });
+    expect(migrated?.marketplaceListings[0]).toMatchObject({ marketplace: "reverb", externalUrl: "https://reverb.com/item/1" });
+    expect(migrated?.marketplaceListings[0].publishedAt).toBeUndefined();
+  });
+  it.each([0, -1, NaN, Infinity, "250", undefined])("still rejects invalid canonical asking price %s", price => {
+    expect(migrateListing({ ...legacyFixture(), price, purchasePrice: "Free", shippingRate: "$5" })).toBeNull();
+  });
+  it.each([{ title: "" }, { description: "short" }, { id: "" }, { createdAt: "invalid" }])(
+    "still rejects invalid canonical identity %j", invalid => {
+      expect(migrateListing({ ...legacyFixture(), ...invalid })).toBeNull();
+    },
+  );
   it("supports older category/platform aliases without accepting arbitrary objects", () => {
     const old = { ...legacyFixture(), selectedPlatforms: undefined, isMusicalItem: false, category: "Instruments", subcategory: "Guitars" };
     expect(migrateListing(old)?.selectedPlatforms).not.toContain("reverb");

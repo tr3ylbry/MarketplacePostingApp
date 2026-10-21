@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createListing, listingSchema, type Listing } from "../domain/listing";
-import { createMoney } from "../domain/money";
+import { createMoney, moneySchema, type Money } from "../domain/money";
 import { imagesFromNames } from "../domain/listingImage";
 import { marketplaceSchema, createMarketplaceListing, type MarketplaceListing } from "../domain/marketplaceListing";
 import { normalizeLegacyListing } from "./legacyListing";
@@ -10,6 +10,19 @@ const legacyIdentity = z.object({
   description: z.string().trim().min(20), price: z.number().finite().positive(),
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime().optional(),
 });
+
+function optionalLegacyMoney(value: string): Money | undefined {
+  const text = value.trim();
+  // Only unambiguous decimal amounts: do not infer currency symbols or "Free".
+  if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return undefined;
+  return moneySchema.safeParse({ amount: Number(text), currency: "USD" }).data;
+}
+
+function legacyMarketplace(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  const canonical = normalized === "facebookmarketplace" ? "facebook-marketplace" : normalized;
+  return marketplaceSchema.safeParse(canonical).data;
+}
 
 // One compatibility conversion for V1 (including its earlier category field names).
 export function migrateListing(raw: unknown): Listing | null {
@@ -21,19 +34,20 @@ export function migrateListing(raw: unknown): Listing | null {
     const listing = createListing({
       title: old.title, description: old.description, condition: old.condition,
       category: old.type, askingPrice: createMoney(old.price),
-      acquisitionCost: old.purchasePrice.trim() ? createMoney(Number(old.purchasePrice)) : undefined,
-      shippingRate: old.shippingRate.trim() ? createMoney(Number(old.shippingRate)) : undefined,
+      acquisitionCost: optionalLegacyMoney(old.purchasePrice),
+      shippingRate: optionalLegacyMoney(old.shippingRate),
       attributes: { ...old, videoUrl: old.youtubeLink },
       selectedPlatforms: old.selectedPlatforms, marketplaceDetails: old,
     });
-    const marketplaceListings: MarketplaceListing[] = old.postingRecords.map((record, index) => {
-      const marketplace = marketplaceSchema.parse(record.platform.toLowerCase());
-      return {
+    const marketplaceListings: MarketplaceListing[] = old.postingRecords.flatMap((record, index) => {
+      const marketplace = legacyMarketplace(record.platform);
+      if (!marketplace) return [];
+      return [{
         ...createMarketplaceListing(old.id, marketplace),
         id: `${old.id}:publication:${index}`,
         status: old.status === "needs-renewal" ? "needs-renewal" as const : "published" as const,
-        externalUrl: record.url, publishedAt: record.datePosted,
-      };
+        externalUrl: record.url, publishedAt: z.iso.datetime().safeParse(record.datePosted).data,
+      }];
     });
     if (old.status === "needs-renewal" && marketplaceListings.length === 0) {
       marketplaceListings.push(...old.selectedPlatforms.map(marketplace => ({
