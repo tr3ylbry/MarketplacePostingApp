@@ -2,3 +2,9 @@ dist
 node_modules
 .DS_Store
 coverage
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+playwright-report
+test-results
