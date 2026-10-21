@@ -3,7 +3,7 @@ import { listings, listingImages, marketplaceListings } from "../db/schema";
 
 export function listingToRows(value: Listing) {
   const listing = listingSchema.parse(value);
-  const row: typeof listings.$inferInsert = {
+  const row: Omit<typeof listings.$inferInsert, "ownerId"> = {
     id: listing.id, title: listing.title, description: listing.description,
     askingPriceAmount: String(listing.askingPrice.amount), currency: listing.askingPrice.currency,
     acquisitionCostAmount: listing.acquisitionCost ? String(listing.acquisitionCost.amount) : null,
