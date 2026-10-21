@@ -1,17 +1,13 @@
 import { getListingAgeLabel, type Listing } from "../../../domain/listing";
+import Link from "next/link";
+import { DeleteListingButton } from "./DeleteListingButton";
 
 interface ListingDashboardProps {
   listings: Listing[];
-  selectedListingId: string | null;
-  onEdit: (listingId: string) => void;
-  onDelete: (listingId: string) => void;
 }
 
 export function ListingDashboard({
   listings,
-  selectedListingId,
-  onEdit,
-  onDelete,
 }: ListingDashboardProps) {
   return (
     <section className="panel">
@@ -30,7 +26,6 @@ export function ListingDashboard({
       ) : (
         <div className="dashboard-list">
           {listings.map((listing) => {
-            const isSelected = listing.id === selectedListingId;
             const categoryLabel =
               listing.marketplaceDetails.ebayCategory ||
               listing.marketplaceDetails.offerupCategory ||
@@ -40,9 +35,9 @@ export function ListingDashboard({
               "No Category";
 
             return (
-              <article className={`listing-card ${isSelected ? "selected" : ""}`} key={listing.id}>
+              <article className="listing-card" key={listing.id}>
                 <div className="listing-card-header">
-                  <h3>{listing.title}</h3>
+                  <h3><Link href={`/listings/${encodeURIComponent(listing.id)}`}>{listing.title}</Link></h3>
                   <span className={`status-pill status-${listing.status}`}>
                     {listing.status}
                   </span>
@@ -53,20 +48,8 @@ export function ListingDashboard({
                 </p>
                 <p>{getListingAgeLabel(listing.createdAt)}</p>
                 <div className="listing-card-actions">
-                  <button
-                    className="secondary-button"
-                    onClick={() => onEdit(listing.id)}
-                    type="button"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="danger-button"
-                    onClick={() => onDelete(listing.id)}
-                    type="button"
-                  >
-                    Delete
-                  </button>
+                  <Link className="secondary-button" href={`/listings/${encodeURIComponent(listing.id)}/edit`}>Edit</Link>
+                  <DeleteListingButton id={listing.id} />
                 </div>
               </article>
             );

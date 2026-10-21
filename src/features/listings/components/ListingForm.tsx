@@ -1,3 +1,4 @@
+"use client";
 import { type CreateListingInput, validateListingInput } from "../listingFormInput";
 import { toFormInput } from "../listingFormMapping";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
@@ -20,9 +21,9 @@ interface ListingFormProps {
   onContinueToPreview: () => void;
   photos: ListingPhotoUpload[];
   initialSelectedPlatforms: PlatformSiteKey[];
-  onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
-  onCreateAndExit: (input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
-  onUpdate: (listingId: string, input: CreateListingInput, photos: ListingPhotoUpload[]) => void;
+  onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
+  onCreateAndExit: (input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
+  onUpdate: (listingId: string, input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
   onDelete: (listingId: string) => void;
   onExitToHome: () => void;
   onOpenManage: () => void;
@@ -457,7 +458,7 @@ export function ListingForm({
     onDelete(listing.id);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitAttempted(true);
 
@@ -466,18 +467,19 @@ export function ListingForm({
     }
 
     if (mode === "edit" && listing) {
-      onUpdate(
+      const saved = await onUpdate(
         listing.id,
         nextInput,
         readyOrderedPhotos.length > 0 ? readyOrderedPhotos : selectedListingPhotos,
       );
+      if (!saved) return;
       setHasSavedDraft(true);
       setIsDirty(false);
       setShowSavedToast(true);
       return;
     }
 
-    onCreate(nextInput, readyOrderedPhotos);
+    if (!await onCreate(nextInput, readyOrderedPhotos)) return;
     setHasSavedDraft(true);
     setIsDirty(false);
     setShowSavedToast(true);
@@ -492,7 +494,7 @@ export function ListingForm({
     onExitToHome();
   }
 
-  function handleSaveAndExit() {
+  async function handleSaveAndExit() {
     setSubmitAttempted(true);
 
     if (validationErrors.length > 0) {
@@ -500,7 +502,7 @@ export function ListingForm({
       return;
     }
 
-    onCreateAndExit(nextInput, readyOrderedPhotos);
+    if (!await onCreateAndExit(nextInput, readyOrderedPhotos)) return;
     setShowExitModal(false);
   }
 

@@ -1,3 +1,4 @@
+"use client";
 import { useEffect, useState } from "react";
 import type { Listing } from "../../../domain/listing";
 import { previewMappers as adapters } from "../../../platforms";

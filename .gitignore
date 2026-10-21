@@ -8,3 +8,5 @@ coverage
 .env.*.local
 playwright-report
 test-results
+.next
+next-env.d.ts
