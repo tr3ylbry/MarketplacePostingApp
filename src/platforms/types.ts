@@ -1,4 +1,4 @@
-import type { Listing } from "../domain/listing";
+import type { Listing, PlatformSiteKey } from "../domain/listing";
 
 export interface FormattedListingField {
   key: string;
@@ -21,8 +21,15 @@ export interface FormattedListing {
   notes: string[];
 }
 
-export interface PlatformAdapter {
-  key: string;
+export interface MarketplaceValidationResult {
+  errors: string[];
+  warnings: string[];
+}
+
+export interface MarketplaceMapper {
+  key: PlatformSiteKey | "offerup-facebook";
   label: string;
-  formatListing: (listing: Listing) => FormattedListing;
+  sites: readonly PlatformSiteKey[];
+  validate: (listing: Listing) => MarketplaceValidationResult;
+  createDraft: (listing: Listing) => FormattedListing;
 }

@@ -1,57 +1,44 @@
+import { formatMoney } from "../domain/money";
+import { reverbRequiredErrors } from "./reverbValidation";
+import { imageNames } from "../domain/listingImage";
 import type { Listing } from "../domain/listing";
 import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
-import type { PlatformAdapter } from "./types";
+import type { MarketplaceMapper } from "./types";
 
 const REVERB_TARGET = photoTargets.find((target) => target.key === "reverb")!;
 
-export const reverbAdapter: PlatformAdapter = {
+export const reverbMapper: MarketplaceMapper = {
   key: "reverb",
   label: "Reverb",
-  formatListing(listing: Listing) {
+  sites: ["reverb"],
+  validate(listing: Listing) {
+    return { errors: Object.values(reverbRequiredErrors({
+      ...listing.attributes, title: listing.title, description: listing.description,
+      category: listing.marketplaceDetails.reverbCategory || listing.category,
+      price: listing.askingPrice, shippingRate: listing.shippingRate,
+    })), warnings: [] };
+  },
+  createDraft(listing: Listing) {
     const suggestedCategories = getSuggestedCategories(listing);
-    const notes: string[] = [];
 
-    if (!listing.brand) {
-      notes.push("Brand is required for Reverb.");
-    }
-
-    if (!listing.model) {
-      notes.push("Model is required for Reverb.");
-    }
-
-    if (!listing.title) {
-      notes.push("Listing title is required for Reverb.");
-    }
-
-    if (!listing.description) {
-      notes.push("Description is required for Reverb.");
-    }
-
-    if (!Number.isFinite(listing.price) || listing.price <= 0) {
-      notes.push("Listing price is required for Reverb.");
-    }
-
-    if (!listing.shippingRate) {
-      notes.push("Shipping rate is required for Reverb.");
-    }
 
     return {
       platform: "Reverb",
       fields: [
-        { key: "brand", label: "Brand", value: listing.brand },
-        { key: "model", label: "Model", value: listing.model },
-        { key: "year", label: "Year", value: listing.year },
-        { key: "finish", label: "Finish", value: listing.finish },
+        { key: "brand", label: "Brand", value: listing.attributes.brand },
+        { key: "model", label: "Model", value: listing.attributes.model },
+        { key: "year", label: "Year", value: listing.attributes.year },
+        { key: "finish", label: "Finish", value: listing.attributes.finish },
         {
           key: "manufacturerCountry",
           label: "Manufacturer's Country",
-          value: listing.manufacturerCountry,
+          value: listing.attributes.manufacturerCountry,
         },
         {
           key: "category",
           label: "Category (Reverb)",
-          value: suggestedCategories.reverbCategory,
+          value: listing.marketplaceDetails.reverbCategory || listing.category || suggestedCategories.reverbCategory,
         },
         {
           key: "subcategory",
@@ -73,22 +60,22 @@ export const reverbAdapter: PlatformAdapter = {
         {
           key: "youtubeLink",
           label: "Link to a YouTube Video",
-          value: listing.youtubeLink,
+          value: listing.attributes.videoUrl,
         },
         {
           key: "price",
           label: "Listing Price",
-          value: listing.price > 0 ? listing.price.toFixed(2) : "",
+          value: listing.askingPrice.amount > 0 ? listing.askingPrice.amount.toFixed(2) : "",
         },
         {
           key: "purchasePrice",
           label: "What You Paid for the Item",
-          value: listing.purchasePrice,
+          value: formatMoney(listing.acquisitionCost),
         },
         {
           key: "shippingRate",
           label: "Shipping Rate",
-          value: listing.shippingRate,
+          value: formatMoney(listing.shippingRate),
         },
       ],
       photoSets: [
@@ -96,10 +83,10 @@ export const reverbAdapter: PlatformAdapter = {
           key: REVERB_TARGET.key,
           label: REVERB_TARGET.label,
           limit: REVERB_TARGET.limit,
-          imageNames: listing.imageNames.slice(0, REVERB_TARGET.limit),
+          imageNames: imageNames(listing.images).slice(0, REVERB_TARGET.limit),
         },
       ],
-      notes: [...notes, "Category values are scaffolded suggestions from the listing copy."],
+      notes: [ "Category values are scaffolded suggestions from the listing copy."],
     };
   },
 };

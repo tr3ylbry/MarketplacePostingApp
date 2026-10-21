@@ -1,24 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Listing } from "../../../domain/listing";
-import {
-  craigslistAdapter,
-  ebayAdapter,
-  offerupFacebookAdapter,
-  reverbAdapter,
-} from "../../../platforms";
+import { previewMappers as adapters } from "../../../platforms";
 import type { PlatformSiteKey } from "../../../domain/listing";
 
 interface PlatformPreviewProps {
   listing: Listing | null;
   onBack?: () => void;
 }
-
-const adapters = [
-  ebayAdapter,
-  offerupFacebookAdapter,
-  craigslistAdapter,
-  reverbAdapter,
-];
 
 const platformSiteMeta: Record<
   PlatformSiteKey,
@@ -130,24 +118,7 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
   const filteredAdapters = listing
-    ? adapters.filter((adapter) => {
-        if (adapter.key === offerupFacebookAdapter.key) {
-          return (
-            listing.selectedPlatforms.includes("offerup") ||
-            listing.selectedPlatforms.includes("facebook-marketplace")
-          );
-        }
-
-        if (adapter.key === ebayAdapter.key) {
-          return listing.selectedPlatforms.includes("ebay");
-        }
-
-        if (adapter.key === craigslistAdapter.key) {
-          return listing.selectedPlatforms.includes("craigslist");
-        }
-
-        return listing.selectedPlatforms.includes("reverb");
-      })
+    ? adapters.filter(adapter => adapter.sites.some(site => listing.selectedPlatforms.includes(site)))
     : adapters;
   const clampedAdapterIndex = Math.min(
     selectedAdapterIndex,
@@ -164,7 +135,7 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
     }
   }, [clampedAdapterIndex, selectedAdapterIndex]);
 
-  if (!listing) {
+  if (!listing || filteredAdapters.length === 0) {
     return (
       <section className="panel panel-muted">
         <p className="panel-kicker">Platform Preview</p>
@@ -176,17 +147,10 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
 
   const activeListing = listing;
   const adapter = filteredAdapters[clampedAdapterIndex];
-  const formatted = adapter.formatListing(activeListing);
-  const previewSites: PlatformSiteKey[] =
-    adapter.key === offerupFacebookAdapter.key
-      ? (["offerup", "facebook-marketplace"] as const).filter((site) =>
-          activeListing.selectedPlatforms.includes(site),
-        )
-      : adapter.key === ebayAdapter.key
-        ? ["ebay"]
-        : adapter.key === craigslistAdapter.key
-          ? ["craigslist"]
-          : ["reverb"];
+  const draft = adapter.createDraft(activeListing);
+  const validation = adapter.validate(activeListing);
+  const formatted = { ...draft, notes: [...validation.errors, ...validation.warnings, ...draft.notes] };
+  const previewSites = adapter.sites.filter(site => activeListing.selectedPlatforms.includes(site));
 
   async function handleCopy(fieldKey: string, value: string) {
     await navigator.clipboard.writeText(value);

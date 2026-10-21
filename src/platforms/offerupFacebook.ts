@@ -1,28 +1,21 @@
+import { imageNames } from "../domain/listingImage";
 import type { Listing } from "../domain/listing";
 import { getSuggestedCategories } from "./categorySuggestions";
 import { photoTargets } from "./photoTargets";
-import type { PlatformAdapter } from "./types";
+import type { MarketplaceMapper } from "./types";
 
 const OFFERUP_TARGET = photoTargets.find((target) => target.key === "offerup")!;
 const FACEBOOK_TARGET = photoTargets.find(
   (target) => target.key === "facebook-marketplace",
 )!;
 
-export const offerupFacebookAdapter: PlatformAdapter = {
+export const offerupFacebookMapper: MarketplaceMapper = {
   key: "offerup-facebook",
   label: "OfferUp / Facebook Marketplace",
-  formatListing(listing: Listing) {
-    const suggestedCategories = getSuggestedCategories(listing);
+  sites: ["offerup", "facebook-marketplace"],
+  validate(listing: Listing) {
     const notes: string[] = [];
-    const usesOfferUp = listing.selectedPlatforms.includes("offerup");
-    const usesFacebook = listing.selectedPlatforms.includes("facebook-marketplace");
-    const platformLabel =
-      usesOfferUp && usesFacebook
-        ? "OfferUp / Facebook Marketplace"
-        : usesOfferUp
-          ? "OfferUp"
-          : "Facebook Marketplace";
-
+    const platformLabel = "OfferUp / Facebook Marketplace";
     if (!listing.title) {
       notes.push(`Title is required for ${platformLabel}.`);
     }
@@ -35,15 +28,29 @@ export const offerupFacebookAdapter: PlatformAdapter = {
       notes.push(`Condition is required for ${platformLabel}.`);
     }
 
-    if (!Number.isFinite(listing.price) || listing.price <= 0) {
+    if (!Number.isFinite(listing.askingPrice.amount) || listing.askingPrice.amount <= 0) {
       notes.push(`Price is required for ${platformLabel}.`);
     }
+
+    return { errors: notes, warnings: [] };
+  },
+  createDraft(listing: Listing) {
+    const suggestedCategories = getSuggestedCategories(listing);
+    const usesOfferUp = listing.selectedPlatforms.includes("offerup");
+    const usesFacebook = listing.selectedPlatforms.includes("facebook-marketplace");
+    const platformLabel =
+      usesOfferUp && usesFacebook
+        ? "OfferUp / Facebook Marketplace"
+        : usesOfferUp
+          ? "OfferUp"
+          : "Facebook Marketplace";
+
 
     return {
       platform: platformLabel,
       fields: [
         { key: "title", label: "Title", value: listing.title },
-        { key: "price", label: "Price", value: listing.price > 0 ? listing.price.toFixed(2) : "" },
+        { key: "price", label: "Price", value: listing.askingPrice.amount > 0 ? listing.askingPrice.amount.toFixed(2) : "" },
         ...(usesOfferUp && usesFacebook
           ? [
               {
@@ -83,10 +90,10 @@ export const offerupFacebookAdapter: PlatformAdapter = {
           : []),
         { key: "condition", label: "Condition", value: listing.condition },
         ...(usesOfferUp
-          ? [{ key: "brand", label: "Brand (OfferUp)", value: listing.brand }]
+          ? [{ key: "brand", label: "Brand (OfferUp)", value: listing.attributes.brand }]
           : []),
         ...(usesOfferUp
-          ? [{ key: "type", label: "Type (OfferUp)", value: listing.type }]
+          ? [{ key: "type", label: "Type (OfferUp)", value: listing.attributes.type }]
           : []),
         {
           key: "description",
@@ -102,7 +109,7 @@ export const offerupFacebookAdapter: PlatformAdapter = {
                 key: OFFERUP_TARGET.key,
                 label: OFFERUP_TARGET.label,
                 limit: OFFERUP_TARGET.limit,
-                imageNames: listing.imageNames.slice(0, OFFERUP_TARGET.limit),
+                imageNames: imageNames(listing.images).slice(0, OFFERUP_TARGET.limit),
               },
             ]
           : []),
@@ -112,12 +119,12 @@ export const offerupFacebookAdapter: PlatformAdapter = {
                 key: FACEBOOK_TARGET.key,
                 label: FACEBOOK_TARGET.label,
                 limit: FACEBOOK_TARGET.limit,
-                imageNames: listing.imageNames.slice(0, FACEBOOK_TARGET.limit),
+                imageNames: imageNames(listing.images).slice(0, FACEBOOK_TARGET.limit),
               },
             ]
           : []),
       ],
-      notes: [...notes, "Category values are scaffolded suggestions from the listing copy."],
+      notes: [ "Category values are scaffolded suggestions from the listing copy."],
     };
   },
 };

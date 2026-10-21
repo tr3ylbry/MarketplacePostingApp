@@ -32,11 +32,11 @@ export function ListingDashboard({
           {listings.map((listing) => {
             const isSelected = listing.id === selectedListingId;
             const categoryLabel =
-              listing.ebayCategory ||
-              listing.offerupCategory ||
-              listing.facebookCategory ||
-              listing.craigslistCategory ||
-              listing.reverbCategory ||
+              listing.marketplaceDetails.ebayCategory ||
+              listing.marketplaceDetails.offerupCategory ||
+              listing.marketplaceDetails.facebookCategory ||
+              listing.marketplaceDetails.craigslistCategory ||
+              listing.marketplaceDetails.reverbCategory ||
               "No Category";
 
             return (
@@ -47,7 +47,7 @@ export function ListingDashboard({
                     {listing.status}
                   </span>
                 </div>
-                <p>${listing.price.toFixed(2)}</p>
+                <p>${listing.askingPrice.amount.toFixed(2)}</p>
                 <p>
                   {categoryLabel} · {listing.condition || "No Condition"}
                 </p>

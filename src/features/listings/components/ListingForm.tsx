@@ -1,9 +1,9 @@
+import { type CreateListingInput, validateListingInput } from "../listingFormInput";
+import { toFormInput } from "../listingFormMapping";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import {
-  type CreateListingInput,
   type Listing,
   type PlatformSiteKey,
-  validateListingInput,
 } from "../../../domain/listing";
 import { buildListingPhotoBundle } from "../photoBundle";
 import {
@@ -73,38 +73,7 @@ function buildInitialState(
     };
   }
 
-  return {
-    selectedPlatforms: listing.selectedPlatforms,
-    brand: listing.brand,
-    model: listing.model,
-    type: listing.type,
-    year: listing.year,
-    finish: listing.finish,
-    manufacturerCountry: listing.manufacturerCountry,
-    ebayCategory: listing.ebayCategory,
-    offerupCategory: listing.offerupCategory,
-    offerupSubcategory: listing.offerupSubcategory,
-    facebookCategory: listing.facebookCategory,
-    craigslistCategory: listing.craigslistCategory,
-    reverbCategory: listing.reverbCategory,
-    reverbSubcategory: listing.reverbSubcategory,
-    reverbAdditionalSubcategory: listing.reverbAdditionalSubcategory,
-    title: listing.title,
-    description: listing.description,
-    price: listing.price,
-    condition: listing.condition,
-    youtubeLink: listing.youtubeLink,
-    purchasePrice: listing.purchasePrice,
-    shippingRate: listing.shippingRate,
-    craigslistCity: listing.craigslistCity,
-    craigslistZipCode: listing.craigslistZipCode,
-    craigslistSizeDimensions: listing.craigslistSizeDimensions,
-    craigslistPhoneNumber: listing.craigslistPhoneNumber,
-    craigslistContactName: listing.craigslistContactName,
-    craigslistStreet: listing.craigslistStreet,
-    craigslistCrossStreet: listing.craigslistCrossStreet,
-    imageNames: listing.imageNames,
-  };
+  return toFormInput(listing);
 }
 
 function normalizeCurrencyInput(value: string) {

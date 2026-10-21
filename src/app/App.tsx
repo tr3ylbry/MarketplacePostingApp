@@ -12,6 +12,7 @@ type ComposerStep = "form" | "preview";
 export default function App() {
   const {
     listings,
+    storageError,
     createListing,
     updateListing,
     deleteListing,
@@ -189,6 +190,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      {storageError ? <p role="alert">{storageError}</p> : null}
       <section className="hero">
         <p className="eyebrow">Marketplace Posting Assistant</p>
         <h1>Create once.<br />Tailor per marketplace.<br />Track what's live.</h1>

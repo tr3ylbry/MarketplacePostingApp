@@ -1,10 +1,10 @@
+import type { Listing } from "../../../domain/listing";
+import type { CreateListingInput } from "../listingFormInput";
 import { useEffect, useMemo, useState } from "react";
 import {
-  createListing as buildListing,
-  type CreateListingInput,
-  type Listing,
-  updateListing as buildUpdatedListing,
-} from "../../../domain/listing";
+  createListingFromForm as buildListing,
+  updateListingFromForm as buildUpdatedListing,
+} from "../listingFormMapping";
 import { loadListings, saveListings } from "../../../storage/listingsStorage";
 import type { ListingPhotoUpload } from "../types";
 
@@ -12,10 +12,12 @@ export function useListings() {
   const [listings, setListings] = useState<Listing[]>(() => loadListings());
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [listingPhotos, setListingPhotos] = useState<Record<string, ListingPhotoUpload[]>>({});
+  const [storageError, setStorageError] = useState<string | null>(null);
 
-  useEffect(() => {
-    saveListings(listings);
-  }, [listings]);
+  function persist(next: Listing[]) {
+    setStorageError(saveListings(next) ? null : "Changes are in memory only. Local storage could not save them.");
+    setListings(next);
+  }
 
   useEffect(() => {
     if (!selectedListingId && listings.length > 0) {
@@ -34,7 +36,7 @@ export function useListings() {
 
   function createListing(input: CreateListingInput, photos: ListingPhotoUpload[]) {
     const nextListing = buildListing(input);
-    setListings((current) => [nextListing, ...current]);
+    persist([nextListing, ...listings]);
     setListingPhotos((current) => ({ ...current, [nextListing.id]: photos }));
     setSelectedListingId(nextListing.id);
   }
@@ -44,8 +46,8 @@ export function useListings() {
     input: CreateListingInput,
     photos: ListingPhotoUpload[],
   ) {
-    setListings((current) =>
-      current.map((listing) =>
+    persist(
+      listings.map((listing) =>
         listing.id === listingId ? buildUpdatedListing(listing, input) : listing,
       ),
     );
@@ -54,7 +56,7 @@ export function useListings() {
   }
 
   function deleteListing(listingId: string) {
-    setListings((current) => current.filter((listing) => listing.id !== listingId));
+    persist(listings.filter((listing) => listing.id !== listingId));
     setListingPhotos((current) => {
       const nextPhotos = { ...current };
       delete nextPhotos[listingId];
@@ -68,6 +70,7 @@ export function useListings() {
   }
 
   return {
+    storageError,
     listings,
     selectedListing,
     selectedListingPhotos,

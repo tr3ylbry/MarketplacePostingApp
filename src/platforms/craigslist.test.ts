@@ -1,7 +1,7 @@
-import { createListing } from "../domain/listing";
-import { craigslistAdapter } from "./craigslist";
+import { createListingFromForm as createListing } from "../features/listings/listingFormMapping";
+import { craigslistMapper } from "./craigslist";
 
-describe("craigslistAdapter", () => {
+describe("craigslistMapper", () => {
   it("returns Craigslist-specific fields and photo caps", () => {
     const listing = createListing({
       selectedPlatforms: ["craigslist"],
@@ -36,7 +36,7 @@ describe("craigslistAdapter", () => {
       imageNames: Array.from({ length: 26 }, (_, index) => `photo-${index + 1}.jpg`),
     });
 
-    const formatted = craigslistAdapter.formatListing(listing);
+    const formatted = craigslistMapper.createDraft(listing);
 
     expect(formatted.platform).toBe("Craigslist");
     expect(formatted.photoSets[0].imageNames).toHaveLength(24);

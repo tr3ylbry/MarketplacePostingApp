@@ -1,4 +1,5 @@
-import { createListing, validateListingInput } from "./listing";
+import { createListingFromForm as createListing } from "../features/listings/listingFormMapping";
+import { validateListingInput } from "../features/listings/listingFormInput";
 
 describe("listing domain", () => {
   it("creates a normalized draft listing", () => {
@@ -37,15 +38,15 @@ describe("listing domain", () => {
     });
 
     expect(listing.selectedPlatforms).toEqual(["ebay", "craigslist", "reverb"]);
-    expect(listing.brand).toBe("Roland");
-    expect(listing.model).toBe("SP-404 MKII");
-    expect(listing.type).toBe("Sampler");
+    expect(listing.attributes.brand).toBe("Roland");
+    expect(listing.attributes.model).toBe("SP-404 MKII");
+    expect(listing.attributes.type).toBe("Sampler");
     expect(listing.title).toBe("Roland SP-404 MKII");
     expect(listing.description).toBe(
       "Excellent condition sampler with power supply and original box included.",
     );
     expect(listing.status).toBe("draft");
-    expect(listing.postingRecords).toEqual([]);
+    expect(listing.marketplaceListings).toEqual([]);
   });
 
   it("returns validation errors for incomplete input", () => {
