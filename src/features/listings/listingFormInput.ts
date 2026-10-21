@@ -126,4 +126,3 @@ export function validateListingInput(input: CreateListingInput): string[] {
 
   return errors;
 }
-
