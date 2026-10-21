@@ -231,6 +231,15 @@ button,
   cursor: pointer;
 }
 
+/* Routed navigation links retain the existing button geometry. */
+a.primary-button,
+a.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  text-decoration: none;
+}
+
 .secondary-button,
 .copy-button {
   border: 1px solid #d5dde5;
