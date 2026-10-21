@@ -54,7 +54,19 @@ export class DrizzleImageRepository implements ImageRepository {
     return row ? imageFromRow(row.image) : null;
   }
 
-  async finalize(owner: string, listingId: string, imageId: string, verify: (upload: ImageUpload) => Promise<BlobImageSource>) {
+  async resolveUpload(owner: string, listingId: string, imageId: string): Promise<ImageUpload | null> {
+    return this.db.transaction(async tx => {
+      await lockOwnedListing(tx, owner, listingId);
+      const [saved] = await tx.select({ id: listingImages.id }).from(listingImages)
+        .where(and(eq(listingImages.id, imageId), eq(listingImages.listingId, listingId)));
+      if (saved) return null;
+      const [pending] = await tx.select().from(imageUploads).where(and(eq(imageUploads.id, imageId), eq(imageUploads.listingId, listingId)));
+      if (!pending || Date.parse(pending.expiresAt) <= Date.now()) throw new ImageOperationError("Upload expired or was not found. Select the file again.");
+      return { ...pending, ...uploadInputSchema.parse({ filename: pending.filename, contentType: pending.contentType, size: pending.size }), expiresAt: new Date(pending.expiresAt).toISOString() };
+    });
+  }
+
+  async finalize(owner: string, listingId: string, imageId: string, verifiedSource: BlobImageSource) {
     await this.db.transaction(async tx => {
       await lockOwnedListing(tx, owner, listingId);
       const images = await tx.select().from(listingImages).where(eq(listingImages.listingId, listingId));
@@ -63,9 +75,8 @@ export class DrizzleImageRepository implements ImageRepository {
       if (!pending || Date.parse(pending.expiresAt) <= Date.now()) throw new ImageOperationError("Upload expired or was not found. Select the file again.");
       const [cleanup] = await tx.select().from(imageCleanup).where(eq(imageCleanup.pathname, pending.pathname)).for("update");
       if (!cleanup || Date.parse(pending.expiresAt) <= Date.now()) throw new ImageOperationError("Upload expired. Select the file again.");
-      const upload: ImageUpload = { ...pending, ...uploadInputSchema.parse({ filename: pending.filename, contentType: pending.contentType, size: pending.size }), expiresAt: new Date(pending.expiresAt).toISOString() };
-      const source = blobImageSourceSchema.parse(await verify(upload));
-      if (source.pathname !== upload.pathname || source.size !== upload.size || source.contentType !== upload.contentType || source.originalFilename !== upload.filename) {
+      const source = blobImageSourceSchema.parse(verifiedSource);
+      if (source.pathname !== pending.pathname || source.size !== pending.size || source.contentType !== pending.contentType || source.originalFilename !== pending.filename) {
         throw new ImageOperationError("Uploaded image metadata does not match the reservation.");
       }
       const order = Math.max(-1, ...images.map(image => image.order)) + 1;

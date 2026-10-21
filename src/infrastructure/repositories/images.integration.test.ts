@@ -17,6 +17,11 @@ let storage: MemoryImageStorage, service: ReturnType<typeof createImageService>,
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
 const input = { filename: "photo.png", contentType: "image/png", size: png.length };
 const paths = new Set<string>();
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
 beforeAll(() => migrate(db, { migrationsFolder: "drizzle" }));
 beforeEach(async () => {
   const helpers = (await auth.$context).test;
@@ -24,6 +29,7 @@ beforeEach(async () => {
   storage = new MemoryImageStorage(); service = createImageService(repository, storage);
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const upload of storage.uploads.values()) paths.add(upload.pathname);
   for (const owner of [a, b]) { await db.delete(schema.listings).where(eq(schema.listings.ownerId, owner)); await db.delete(schema.users).where(eq(schema.users.id, owner)); }
   for (const pathname of paths) await db.delete(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, pathname));
@@ -108,6 +114,7 @@ it("removes metadata before failed cleanup, resequences and safely repeats delet
   await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, first.pathname));
   expect((await cleanupImages(db, storage)).failed).toBeGreaterThan(0);
   storage.failDelete = false;
+  await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, first.pathname));
   expect((await cleanupImages(db, storage)).removed).toBeGreaterThan(0);
   expect(storage.objects.has(first.pathname)).toBe(false); expect(storage.objects.has(second.pathname)).toBe(true);
 });
@@ -123,13 +130,23 @@ it("compensates missing or mismatched objects without creating saved metadata", 
 });
 it("compensates a database failure after verification and never deletes an ambiguously committed image", async () => {
   const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
-  const failing = createImageService({ ...repository, reserve: repository.reserve.bind(repository), get: repository.get.bind(repository), remove: repository.remove.bind(repository), reorder: repository.reorder.bind(repository), cancel: repository.cancel.bind(repository),
-    async finalize(_owner, _listing, _id, verify) { await verify(upload); throw new Error("Database failure"); } }, storage);
+  const verify = vi.spyOn(storage, "verifyUpload");
+  const commit = vi.spyOn(repository, "finalize").mockRejectedValueOnce(new Error("Database failure"));
+  const failing = createImageService(repository, storage);
   await expect(failing.finalize(a, listing.id, upload.id)).rejects.toThrow();
+  expect(verify).toHaveBeenCalledOnce();
   expect(storage.deleted).toContain(upload.pathname); expect((await listings.getById(a, listing.id))?.images).toEqual([]);
-  const committed = await saved(a, listing.id);
+  commit.mockRestore();
+  const committed = await prepare(a, listing.id);
+  const finalize = repository.finalize.bind(repository);
+  const ambiguous = vi.spyOn(repository, "finalize").mockImplementationOnce(async (...args) => {
+    await finalize(...args); throw new Error("Commit response lost");
+  });
   await expect(failing.finalize(a, listing.id, committed.id)).rejects.toThrow();
+  expect((await listings.getById(a, listing.id))?.images[0].id).toBe(committed.id);
   expect(storage.deleted).not.toContain(committed.pathname);
+  ambiguous.mockRestore(); verify.mockRestore();
+  await failing.finalize(a, listing.id, committed.id);
 });
 it("listing deletion cascades metadata and cleans only its owner's saved and pending objects", async () => {
   const la = await listings.create(a, listingFixture()), lb = await listings.create(b, listingFixture());
@@ -156,4 +173,96 @@ it("expires abandoned reservations, releases capacity and retains cleanup until 
   await expect(service.finalize(a, listing.id, upload.id)).rejects.toThrow("expired");
   expect(await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, upload.pathname))).toHaveLength(1);
   expect((await listings.getById(a, listing.id))?.images).toEqual([]);
+});
+
+it("performs verification and cleanup provider calls with no active database transaction", async () => {
+  const transaction = db.transaction.bind(db);
+  let active = 0;
+  vi.spyOn(db, "transaction").mockImplementation(async (...args) => {
+    active++;
+    try { return await transaction(...args); } finally { active--; }
+  });
+  const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
+  const verify = storage.verifyUpload.bind(storage);
+  vi.spyOn(storage, "verifyUpload").mockImplementation(async value => { expect(active).toBe(0); return verify(value); });
+  await service.finalize(a, listing.id, upload.id);
+  await repository.remove(a, listing.id, upload.id);
+  await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, upload.pathname));
+  const remove = storage.deleteObject.bind(storage);
+  vi.spyOn(storage, "deleteObject").mockImplementation(async path => { expect(active).toBe(0); await remove(path); });
+  expect((await cleanupImages(db, storage)).removed).toBeGreaterThan(0);
+  expect(storage.deleted).toContain(upload.pathname);
+});
+
+it("allows a second finalizer to commit while the first is verifying, then resolves both idempotently", async () => {
+  const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
+  const entered = signal(), release = signal();
+  const verify = storage.verifyUpload.bind(storage);
+  vi.spyOn(storage, "verifyUpload").mockImplementationOnce(async value => {
+    const source = await verify(value); entered.resolve(); await release.promise; return source;
+  });
+  const first = service.finalize(a, listing.id, upload.id);
+  try {
+    await entered.promise;
+    await service.finalize(a, listing.id, upload.id);
+    expect((await listings.getById(a, listing.id))?.images).toHaveLength(1);
+  } finally { release.resolve(); }
+  await first;
+  expect((await listings.getById(a, listing.id))?.images).toHaveLength(1);
+  expect(storage.deleted).toEqual([]);
+});
+
+it("rejects expiry between provider verification and commit and safely compensates", async () => {
+  const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
+  const verify = storage.verifyUpload.bind(storage);
+  vi.spyOn(storage, "verifyUpload").mockImplementationOnce(async value => {
+    const source = await verify(value);
+    await db.update(schema.imageUploads).set({ expiresAt: new Date(0).toISOString() }).where(eq(schema.imageUploads.id, upload.id));
+    return source;
+  });
+  await expect(service.finalize(a, listing.id, upload.id)).rejects.toThrow("expired");
+  expect((await listings.getById(a, listing.id))?.images).toEqual([]);
+  expect(storage.deleted).toContain(upload.pathname);
+});
+
+it.each(["pathname", "contentType", "size", "originalFilename"] as const)("rechecks verified %s against immutable reservation at commit", async field => {
+  const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
+  const source = await storage.verifyUpload(upload);
+  const overrides = { pathname: `images/${crypto.randomUUID()}/other.png`, contentType: "image/jpeg" as const, size: source.size + 1, originalFilename: "other.png" };
+  vi.spyOn(storage, "verifyUpload").mockResolvedValueOnce({ ...source, [field]: overrides[field] });
+  await expect(service.finalize(a, listing.id, upload.id)).rejects.toThrow("does not match");
+  expect((await listings.getById(a, listing.id))?.images).toEqual([]);
+});
+
+it("cleanup skips committed images and unexpired reservations even with an early due ledger entry", async () => {
+  const listing = await listings.create(a, listingFixture()), committed = await saved(a, listing.id), pending = await prepare(a, listing.id);
+  await db.insert(schema.imageCleanup).values({ pathname: committed.pathname, notBefore: new Date(0).toISOString() });
+  await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, pending.pathname));
+  await cleanupImages(db, storage);
+  expect(storage.deleted).not.toContain(committed.pathname); expect(storage.deleted).not.toContain(pending.pathname);
+  await service.finalize(a, listing.id, pending.id);
+  expect((await listings.getById(a, listing.id))?.images).toHaveLength(2);
+});
+
+it("cleanup leases exclude concurrent workers and retain a requeued entry on completion", async () => {
+  const listing = await listings.create(a, listingFixture()), upload = await prepare(a, listing.id);
+  await db.update(schema.imageUploads).set({ expiresAt: new Date(0).toISOString() }).where(eq(schema.imageUploads.id, upload.id));
+  await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, upload.pathname));
+  const entered = signal(), release = signal();
+  const remove = storage.deleteObject.bind(storage);
+  vi.spyOn(storage, "deleteObject").mockImplementationOnce(async path => { entered.resolve(); await release.promise; await remove(path); });
+  const first = cleanupImages(db, storage);
+  try {
+    await entered.promise;
+    await cleanupImages(db, storage);
+    expect(storage.deleteObject).toHaveBeenCalledOnce();
+    await db.update(schema.imageCleanup).set({ notBefore: new Date(Date.now() + 600000).toISOString() }).where(eq(schema.imageCleanup.pathname, upload.pathname));
+  } finally { release.resolve(); }
+  await first;
+  expect(await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, upload.pathname))).toHaveLength(1);
+  expect(await db.select().from(schema.imageUploads).where(eq(schema.imageUploads.id, upload.id))).toHaveLength(1);
+  await db.update(schema.imageCleanup).set({ notBefore: new Date(0).toISOString() }).where(eq(schema.imageCleanup.pathname, upload.pathname));
+  await cleanupImages(db, storage);
+  expect(await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, upload.pathname))).toEqual([]);
+  expect(await db.select().from(schema.imageUploads).where(eq(schema.imageUploads.id, upload.id))).toEqual([]);
 });

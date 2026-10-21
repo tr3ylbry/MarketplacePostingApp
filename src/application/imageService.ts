@@ -27,7 +27,12 @@ export function createImageService(repository: ImageRepository, storage: ImageSt
     },
     async finalize(owner: string, listingId: string, imageId: string) {
       validate(owner, listingId, imageId);
-      try { await repository.finalize(owner, listingId, imageId, upload => storage.verifyUpload(upload)); }
+      try {
+        const upload = await repository.resolveUpload(owner, listingId, imageId);
+        if (!upload) return; // Already committed, with ownership checked by the repository.
+        const source = await storage.verifyUpload(upload);
+        await repository.finalize(owner, listingId, imageId, source);
+      }
       catch (error) {
         // cancel checks committed state under the parent lock. Never compensate a
         // successfully committed image after an ambiguous database response.
