@@ -1,2 +1,3 @@
 import { ListingEditor } from "../../../features/listings/components/ListingEditor";
-export default function NewListingPage() { return <ListingEditor initialListing={null} />; }
+import { requireUser } from "../../../auth/session";
+export default async function NewListingPage() { await requireUser(); return <ListingEditor initialListing={null} />; }

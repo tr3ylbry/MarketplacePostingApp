@@ -1,13 +1,20 @@
 import { test, expect } from "@playwright/test";
-import { Pool } from "pg";
-import { testDatabaseUrl } from "../src/test/testDatabase";
+import { createTestAuth } from "../src/test/auth";
 import { listingFixture } from "../src/test/fixtures";
 
-const pool = new Pool({ connectionString: testDatabaseUrl() });
+const { pool, auth } = createTestAuth();
+let userId: string;
+test.beforeEach(async ({ context }) => {
+  const helpers = (await auth.$context).test;
+  const user = await helpers.saveUser(helpers.createUser());
+  userId = user.id;
+  await context.addCookies(await helpers.getCookies({ userId }));
+});
 const ownedIds = new Set<string>();
 test.afterEach(async () => {
   for (const id of ownedIds) await pool.query("DELETE FROM listings WHERE id = $1", [id]);
   ownedIds.clear();
+  await (await auth.$context).test.deleteUser(userId);
 });
 test.afterAll(() => pool.end());
 
@@ -27,6 +34,8 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await expect(page).toHaveURL(/\/listings\/[^/]+\/edit$/);
   const segments = page.url().split("/");
   ownedIds.add(segments[segments.length - 2]);
+  const result = await pool.query<{ owner_id: string }>("SELECT owner_id FROM listings WHERE id = $1", [segments[segments.length - 2]]);
+  expect(result.rows[0].owner_id).toBe(userId);
   await expect(page.getByRole("button", { name: "Download Photo Bundle" })).toBeEnabled();
   await page.reload();
   await expect(page.getByLabel("Title", { exact: false }).first()).toHaveValue("E2E Guitar");
@@ -46,6 +55,40 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page).toHaveURL(/\/listings$/);
   await expect(page.getByRole("link", { name: "Edited E2E Guitar", exact: true })).toHaveCount(0);
+});
+
+test("sign out revokes access and an unauthenticated user reaches only sign-in", async ({ page, context }) => {
+  await page.goto("/listings");
+  await expect(page.getByText(/Signed in as/)).toBeVisible();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+  const session = await context.request.get("/api/auth/get-session");
+  expect(await session.json()).toBeNull();
+  for (const route of ["/listings", "/listings/new", "/listings/known-id", "/listings/known-id/edit"]) {
+    await page.goto(route);
+    await expect(page).toHaveURL(/\/sign-in$/);
+  }
+});
+
+test("another authenticated user cannot read or edit a known foreign listing ID", async ({ page }) => {
+  const helpers = (await auth.$context).test;
+  const other = await helpers.saveUser(helpers.createUser());
+  const listing = listingFixture({ title: "Private other-user guitar" });
+  const { DrizzleListingRepository } = await import("../src/infrastructure/repositories/drizzleListingRepository");
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const schema = await import("../src/infrastructure/db/schema");
+  const repository = new DrizzleListingRepository(drizzle(pool, { schema }));
+  try {
+    await repository.create(other.id, listing);
+    await page.goto("/listings");
+    await expect(page.getByText(listing.title)).toHaveCount(0);
+    for (const suffix of ["", "/edit"]) {
+      await page.goto(`/listings/${listing.id}${suffix}`);
+      await expect(page.getByRole("heading", { name: "Listing not found" })).toBeVisible();
+      await expect(page.getByText(listing.title)).toHaveCount(0);
+    }
+    expect(await repository.getById(other.id, listing.id)).toEqual(listing);
+  } finally { await repository.delete(other.id, listing.id); await helpers.deleteUser(other.id); }
 });
 
 test("explicit local import persists and repeated import skips existing records", async ({ page }) => {

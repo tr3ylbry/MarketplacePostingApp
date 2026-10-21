@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import { pgTable, text, numeric, timestamp, jsonb, integer, index, uniqueIndex, check, pgEnum } from "drizzle-orm/pg-core";
+import { users } from "./authSchema";
+export { users, sessions, accounts, verifications } from "./authSchema";
 
 export const listingStatus = pgEnum("listing_status", ["draft", "active", "sold", "archived"]);
 export const marketplace = pgEnum("marketplace", ["ebay", "craigslist", "reverb", "offerup", "facebook-marketplace"]);
@@ -8,6 +10,7 @@ const instant = (name: string) => timestamp(name, { withTimezone: true, mode: "s
 
 export const listings = pgTable("listings", {
   id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   title: text("title").notNull(), description: text("description").notNull(),
   askingPriceAmount: numeric("asking_price_amount").notNull(), currency: text("currency").notNull(),
   acquisitionCostAmount: numeric("acquisition_cost_amount"), shippingRateAmount: numeric("shipping_rate_amount"),
@@ -18,6 +21,7 @@ export const listings = pgTable("listings", {
   createdAt: instant("created_at").notNull(), updatedAt: instant("updated_at").notNull(),
 }, table => [
   index("listings_created_idx").on(table.createdAt, table.id),
+  index("listings_owner_created_idx").on(table.ownerId, table.createdAt, table.id),
   check("listing_usd", sql`${table.currency} = 'USD'`),
   check("listing_price_positive", sql`${table.askingPriceAmount} > 0 AND ${table.askingPriceAmount} < 'Infinity'::numeric`),
   check("listing_cost_nonnegative", sql`${table.acquisitionCostAmount} >= 0 AND ${table.acquisitionCostAmount} < 'Infinity'::numeric`),
