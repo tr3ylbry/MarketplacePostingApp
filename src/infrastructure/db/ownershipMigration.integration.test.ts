@@ -35,6 +35,9 @@ it("preserves pre-auth aggregates under a non-login holder until an explicit, id
     expect((await client.query("SELECT * FROM listings")).rows).toEqual([{ ...before, owner_id: LEGACY_OWNER_ID }]);
     expect((await client.query("SELECT * FROM listing_images")).rows).toEqual(images);
     expect((await client.query("SELECT * FROM marketplace_listings")).rows).toEqual(publications);
+    await migration("0002_glorious_thaddeus_ross.sql");
+    const migratedImages = (await client.query("SELECT * FROM listing_images")).rows;
+    expect(migratedImages).toEqual([{ id: "legacy-image", listing_id: "legacy-item", storage_provider: "filename", pathname: null, original_filename: "old.jpg", content_type: null, byte_size: null, uploaded_at: null, sort_order: 0, alt_text: null }]);
     const db = drizzle(client, { schema });
     const repository = new DrizzleListingRepository(db);
     await expect(db.insert(schema.sessions).values({ id: crypto.randomUUID(), userId: LEGACY_OWNER_ID, token: crypto.randomUUID(), expiresAt: new Date(Date.now() + 10000) })).rejects.toThrow();
@@ -55,7 +58,7 @@ it("preserves pre-auth aggregates under a non-login holder until an explicit, id
     expect((await db.select().from(schema.listings).where(eq(schema.listings.id, "legacy-item")))[0].ownerId).toBe(owner);
     expect(await repository.getById(other, owned.id)).toEqual(owned);
     expect(await repository.getById(other, "legacy-item")).toBeNull();
-    expect((await client.query("SELECT * FROM listing_images")).rows).toEqual(images);
+    expect((await client.query("SELECT * FROM listing_images")).rows).toEqual(migratedImages);
     expect((await client.query("SELECT * FROM marketplace_listings")).rows).toEqual(publications);
   } finally {
     await client.query("RESET search_path");

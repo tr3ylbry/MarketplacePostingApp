@@ -54,13 +54,13 @@ it("persists service-created listings and publications with omitted optional fie
   await repository.update(ownerId, { ...created, marketplaceListings: [publication] }, created.updatedAt);
   expect((await repository.getById(ownerId, created.id))?.marketplaceListings).toEqual([publication]);
 });
-it("persists edits and reordered images while preserving publication history", async () => {
+it("persists listing edits without allowing filename input to reorder images or change publication history", async () => {
   const listing = fixture();
   await repository.create(ownerId, listing);
   const updated = await service.updateListing(ownerId, listing.id, { ...listing, title: "Updated Guitar", acquisitionCost: undefined, shippingRate: undefined, imageNames: ["rear.jpg", "front.jpg"] }, listing.updatedAt);
   const stored = await repository.getById(ownerId, listing.id);
   expect(stored).toEqual(updated);
-  expect(stored?.images[0].id).toBe(listing.images[1].id);
+  expect(stored?.images).toEqual(listing.images);
   expect(stored?.acquisitionCost).toBeUndefined();
   expect(stored?.shippingRate).toBeUndefined();
   expect(stored?.marketplaceListings).toEqual(listing.marketplaceListings);

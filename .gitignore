@@ -9,3 +9,4 @@ playwright-report
 test-results
 .next
 next-env.d.ts
+.next-test/

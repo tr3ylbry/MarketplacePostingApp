@@ -1,6 +1,6 @@
 import { createListing, updateListing, listingSchema, type Listing, type CreateListingInput as DomainInput } from "../../domain/listing";
 import { createMoney, formatMoney } from "../../domain/money";
-import { imageNames, imagesFromNames } from "../../domain/listingImage";
+import { imageName, imageNames, imagesFromNames } from "../../domain/listingImage";
 import type { CreateListingInput } from "./listingFormInput";
 
 export function toDomainInput(input: CreateListingInput): DomainInput {
@@ -32,7 +32,7 @@ export function updateListingFromForm(listing: Listing, input: CreateListingInpu
   // Match each occurrence once, including duplicate filenames, to retain media identity.
   const remaining = [...listing.images];
   const images = imagesFromNames(listing.id, input.imageNames).map(image => {
-    const index = remaining.findIndex(old => old.source.name === image.source.name);
+    const index = remaining.findIndex(old => imageName(old) === imageName(image));
     if (index < 0) return image;
     const [old] = remaining.splice(index, 1);
     return { ...old, order: image.order };

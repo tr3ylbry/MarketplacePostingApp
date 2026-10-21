@@ -5,12 +5,14 @@ import { ListingConflictError, ListingUnavailableError, type ListingRepository }
 import { ownerIdSchema, type OwnerId } from "../../application/owner";
 import * as schema from "../db/schema";
 import { listingFromRows, listingToRows } from "./listingMapping";
+import { lockOwnedListing, queueCleanup } from "./drizzleImageRepository";
 
 type Database = NodePgDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const { listings, listingImages, marketplaceListings } = schema;
 
 async function insertChildren(tx: Transaction, value: Listing) {
+  if (value.images.some(image => image.source.kind !== "filename")) throw new Error("Stored images must be finalized through the image boundary.");
   const { images, publications } = listingToRows(value);
   if (images.length) await tx.insert(listingImages).values(images);
   if (publications.length) await tx.insert(marketplaceListings).values(publications);
@@ -54,17 +56,25 @@ export class DrizzleListingRepository implements ListingRepository {
       const changed = await tx.update(listings).set(row)
         .where(and(eq(listings.ownerId, ownerId), eq(listings.id, listing.id), eq(listings.updatedAt, expectedUpdatedAt))).returning({ id: listings.id });
       if (!changed.length) throw new ListingConflictError();
-      await tx.delete(listingImages).where(eq(listingImages.listingId, listing.id));
       await tx.delete(marketplaceListings).where(eq(marketplaceListings.listingId, listing.id));
-      await insertChildren(tx, listing);
+      const { publications } = listingToRows(listing);
+      if (publications.length) await tx.insert(marketplaceListings).values(publications);
     });
     return listing;
   }
 
   async delete(ownerId: OwnerId, id: string) {
     ownerIdSchema.parse(ownerId);
-    const deleted = await this.db.delete(listings).where(and(eq(listings.ownerId, ownerId), eq(listings.id, id))).returning({ id: listings.id });
-    if (!deleted.length) throw new ListingUnavailableError();
+    return this.db.transaction(async tx => {
+      await lockOwnedListing(tx, ownerId, id);
+      const images = await tx.select({ pathname: listingImages.pathname }).from(listingImages).where(eq(listingImages.listingId, id));
+      const pending = await tx.select({ pathname: schema.imageUploads.pathname }).from(schema.imageUploads).where(eq(schema.imageUploads.listingId, id));
+      const paths = [...images, ...pending].flatMap(image => image.pathname ? [image.pathname] : []);
+      await queueCleanup(tx, paths);
+      const deleted = await tx.delete(listings).where(and(eq(listings.ownerId, ownerId), eq(listings.id, id))).returning({ id: listings.id });
+      if (!deleted.length) throw new ListingUnavailableError();
+      return paths;
+    });
   }
 
   async importListings(ownerId: OwnerId, values: Listing[]) {

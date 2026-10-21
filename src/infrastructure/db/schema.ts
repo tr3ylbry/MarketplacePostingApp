@@ -30,11 +30,28 @@ export const listings = pgTable("listings", {
 
 export const listingImages = pgTable("listing_images", {
   id: text("id").primaryKey(), listingId: text("listing_id").notNull().references(() => listings.id, { onDelete: "cascade" }),
-  source: jsonb("source").notNull(), order: integer("sort_order").notNull(), altText: text("alt_text"),
+  storageProvider: text("storage_provider").notNull(), pathname: text("pathname"),
+  originalFilename: text("original_filename").notNull(), contentType: text("content_type"), byteSize: integer("byte_size"),
+  uploadedAt: instant("uploaded_at"),
+  order: integer("sort_order").notNull(), altText: text("alt_text"),
 }, table => [
   uniqueIndex("listing_images_order_idx").on(table.listingId, table.order),
+  uniqueIndex("listing_images_path_idx").on(table.pathname),
   check("image_order_nonnegative", sql`${table.order} >= 0`),
+  check("image_source_valid", sql`(${table.storageProvider} = 'filename' AND ${table.pathname} IS NULL AND ${table.contentType} IS NULL AND ${table.byteSize} IS NULL AND ${table.uploadedAt} IS NULL) OR (${table.storageProvider} = 'vercel-blob' AND ${table.pathname} IS NOT NULL AND ${table.contentType} IN ('image/jpeg', 'image/png', 'image/webp') AND ${table.contentType} IS NOT NULL AND ${table.byteSize} > 0 AND ${table.byteSize} <= 10485760 AND ${table.byteSize} IS NOT NULL AND ${table.uploadedAt} IS NOT NULL)`),
 ]);
+
+// Reservations are not visible images. Expired reservations do not consume slots.
+export const imageUploads = pgTable("image_uploads", {
+  id: text("id").primaryKey(), listingId: text("listing_id").notNull().references(() => listings.id, { onDelete: "cascade" }),
+  pathname: text("pathname").notNull().unique(), filename: text("filename").notNull(),
+  contentType: text("content_type").notNull(), size: integer("byte_size").notNull(), expiresAt: instant("expires_at").notNull(),
+}, table => [index("image_uploads_listing_idx").on(table.listingId), check("upload_size_valid", sql`${table.size} > 0 AND ${table.size} <= 10485760`)]);
+
+// Durable retry ledger, not a background job system. Survives parent deletion.
+export const imageCleanup = pgTable("image_cleanup", {
+  pathname: text("pathname").primaryKey(), notBefore: instant("not_before").notNull(),
+}, table => [index("image_cleanup_due_idx").on(table.notBefore)]);
 
 export const marketplaceListings = pgTable("marketplace_listings", {
   id: text("id").primaryKey(), listingId: text("listing_id").notNull().references(() => listings.id, { onDelete: "cascade" }),

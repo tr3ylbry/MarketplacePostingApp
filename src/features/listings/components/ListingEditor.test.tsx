@@ -1,15 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ListingEditor } from "./ListingEditor";
-import { SessionPhotos } from "./SessionPhotos";
 import { listingFixture } from "../../../test/fixtures";
 
 const { update, push, replace } = vi.hoisted(() => ({ update: vi.fn(), push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace, refresh: vi.fn() }) }));
 vi.mock("../../../app/listings/actions", () => ({ updateListingAction: update, createListingAction: vi.fn(), deleteListingAction: vi.fn() }));
+vi.mock("../../../app/listings/imageActions", () => ({ prepareImageAction: vi.fn(), finalizeImageAction: vi.fn(), removeImageAction: vi.fn(), reorderImagesAction: vi.fn() }));
 
 it("keeps edits and shows the server failure instead of claiming a successful save", async () => {
   update.mockResolvedValue({ ok: false, error: "The listing changed. Reload before saving." });
-  render(<SessionPhotos><ListingEditor initialListing={listingFixture()} /></SessionPhotos>);
+  render(<ListingEditor initialListing={listingFixture()} />);
   const title = screen.getByLabelText(/Title/);
   fireEvent.change(title, { target: { value: "Unsaved guitar edit" } });
   fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));

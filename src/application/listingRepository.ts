@@ -13,6 +13,6 @@ export interface ListingRepository {
   getById(ownerId: OwnerId, id: string): Promise<Listing | null>;
   create(ownerId: OwnerId, listing: Listing): Promise<Listing>;
   update(ownerId: OwnerId, listing: Listing, expectedUpdatedAt: string): Promise<Listing>;
-  delete(ownerId: OwnerId, id: string): Promise<void>;
+  delete(ownerId: OwnerId, id: string): Promise<string[] | void>;
   importListings(ownerId: OwnerId, listings: Listing[]): Promise<{ imported: number; skipped: number }>;
 }

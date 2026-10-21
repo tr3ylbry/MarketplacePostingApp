@@ -1,5 +1,5 @@
 import type { Listing, PlatformSiteKey } from "../../domain/listing";
-import type { ListingPhotoUpload } from "./types";
+import type { BundlePhoto } from "./types";
 import { photoTargets } from "../../platforms/photoTargets";
 
 interface ZipEntry {
@@ -128,7 +128,7 @@ export async function buildListingPhotoBundle(
     selectedPlatforms: PlatformSiteKey[];
     title: string;
   },
-  photos: ListingPhotoUpload[],
+  photos: BundlePhoto[],
 ) {
   const safeTitle = sanitizeSegment(listing.title);
   const entries: ZipEntry[] = [];
