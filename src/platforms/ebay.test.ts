@@ -1,7 +1,7 @@
-import { createListing } from "../domain/listing";
-import { ebayAdapter } from "./ebay";
+import { createListingFromForm as createListing } from "../features/listings/listingFormMapping";
+import { ebayMapper } from "./ebay";
 
-describe("ebayAdapter", () => {
+describe("ebayMapper", () => {
   it("truncates long titles and limits images", () => {
     const listing = createListing({
       selectedPlatforms: ["ebay"],
@@ -38,7 +38,7 @@ describe("ebayAdapter", () => {
       imageNames: Array.from({ length: 30 }, (_, index) => `photo-${index + 1}.jpg`),
     });
 
-    const formatted = ebayAdapter.formatListing(listing);
+    const formatted = ebayMapper.createDraft(listing);
 
     const titleField = formatted.fields.find((field) => field.key === "title");
     const fieldLabels = formatted.fields.map((field) => field.label);
@@ -55,9 +55,9 @@ describe("ebayAdapter", () => {
       "Price",
       "Description",
     ]);
-    expect(photoSet.imageNames).toHaveLength(30);
-    expect(formatted.notes).toContain("Title truncated to 80 characters for eBay.");
-    expect(formatted.notes).not.toContain("Using first 40 images for eBay.");
+    expect(photoSet.imageNames).toHaveLength(24);
+    expect(ebayMapper.validate(listing).warnings).toContain("Title truncated to 80 characters for eBay.");
+    expect(ebayMapper.validate(listing).warnings).toContain("Using first 24 images for eBay.");
     expect(formatted.notes).toContain(
       "Category is currently a scaffolded suggestion from the listing copy.",
     );

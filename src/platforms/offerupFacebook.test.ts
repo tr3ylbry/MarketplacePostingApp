@@ -1,7 +1,7 @@
-import { createListing } from "../domain/listing";
-import { offerupFacebookAdapter } from "./offerupFacebook";
+import { createListingFromForm as createListing } from "../features/listings/listingFormMapping";
+import { offerupFacebookMapper } from "./offerupFacebook";
 
-describe("offerupFacebookAdapter", () => {
+describe("offerupFacebookMapper", () => {
   it("returns combined OfferUp and Facebook fields and photo caps", () => {
     const listing = createListing({
       selectedPlatforms: ["offerup", "facebook-marketplace"],
@@ -36,7 +36,7 @@ describe("offerupFacebookAdapter", () => {
       imageNames: Array.from({ length: 14 }, (_, index) => `photo-${index + 1}.jpg`),
     });
 
-    const formatted = offerupFacebookAdapter.formatListing(listing);
+    const formatted = offerupFacebookMapper.createDraft(listing);
 
     expect(formatted.platform).toBe("OfferUp / Facebook Marketplace");
     expect(formatted.fields.map((field) => field.label)).toEqual([

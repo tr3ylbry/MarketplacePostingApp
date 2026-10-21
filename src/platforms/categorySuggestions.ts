@@ -91,33 +91,33 @@ const fallbackCategories: SuggestedCategories = {
 };
 
 export function getSuggestedCategories(listing: Listing): SuggestedCategories {
-  const haystack = `${listing.title} ${listing.description} ${listing.brand} ${listing.model}`;
+  const haystack = `${listing.title} ${listing.description} ${listing.attributes.brand} ${listing.attributes.model}`;
 
   for (const rule of keywordRules) {
     if (rule.pattern.test(haystack)) {
       return {
-        ebayCategory: listing.ebayCategory || rule.categories.ebayCategory,
-        offerupCategory: listing.offerupCategory || rule.categories.offerupCategory,
-        offerupSubcategory: listing.offerupSubcategory || rule.categories.offerupSubcategory,
-        facebookCategory: listing.facebookCategory || rule.categories.facebookCategory,
-        craigslistCategory: listing.craigslistCategory || rule.categories.craigslistCategory,
-        reverbCategory: listing.reverbCategory || rule.categories.reverbCategory,
-        reverbSubcategory: listing.reverbSubcategory || rule.categories.reverbSubcategory,
+        ebayCategory: listing.marketplaceDetails.ebayCategory || rule.categories.ebayCategory,
+        offerupCategory: listing.marketplaceDetails.offerupCategory || rule.categories.offerupCategory,
+        offerupSubcategory: listing.marketplaceDetails.offerupSubcategory || rule.categories.offerupSubcategory,
+        facebookCategory: listing.marketplaceDetails.facebookCategory || rule.categories.facebookCategory,
+        craigslistCategory: listing.marketplaceDetails.craigslistCategory || rule.categories.craigslistCategory,
+        reverbCategory: listing.marketplaceDetails.reverbCategory || rule.categories.reverbCategory,
+        reverbSubcategory: listing.marketplaceDetails.reverbSubcategory || rule.categories.reverbSubcategory,
         reverbAdditionalSubcategory:
-          listing.reverbAdditionalSubcategory || rule.categories.reverbAdditionalSubcategory,
+          listing.marketplaceDetails.reverbAdditionalSubcategory || rule.categories.reverbAdditionalSubcategory,
       };
     }
   }
 
   return {
-    ebayCategory: listing.ebayCategory || fallbackCategories.ebayCategory,
-    offerupCategory: listing.offerupCategory || fallbackCategories.offerupCategory,
-    offerupSubcategory: listing.offerupSubcategory || fallbackCategories.offerupSubcategory,
-    facebookCategory: listing.facebookCategory || fallbackCategories.facebookCategory,
-    craigslistCategory: listing.craigslistCategory || fallbackCategories.craigslistCategory,
-    reverbCategory: listing.reverbCategory || fallbackCategories.reverbCategory,
-    reverbSubcategory: listing.reverbSubcategory || fallbackCategories.reverbSubcategory,
+    ebayCategory: listing.marketplaceDetails.ebayCategory || fallbackCategories.ebayCategory,
+    offerupCategory: listing.marketplaceDetails.offerupCategory || fallbackCategories.offerupCategory,
+    offerupSubcategory: listing.marketplaceDetails.offerupSubcategory || fallbackCategories.offerupSubcategory,
+    facebookCategory: listing.marketplaceDetails.facebookCategory || fallbackCategories.facebookCategory,
+    craigslistCategory: listing.marketplaceDetails.craigslistCategory || fallbackCategories.craigslistCategory,
+    reverbCategory: listing.marketplaceDetails.reverbCategory || fallbackCategories.reverbCategory,
+    reverbSubcategory: listing.marketplaceDetails.reverbSubcategory || fallbackCategories.reverbSubcategory,
     reverbAdditionalSubcategory:
-      listing.reverbAdditionalSubcategory || fallbackCategories.reverbAdditionalSubcategory,
+      listing.marketplaceDetails.reverbAdditionalSubcategory || fallbackCategories.reverbAdditionalSubcategory,
   };
 }

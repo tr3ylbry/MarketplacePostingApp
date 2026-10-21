@@ -1,7 +1,7 @@
-import { createListing } from "../domain/listing";
-import { reverbAdapter } from "./reverb";
+import { createListingFromForm as createListing } from "../features/listings/listingFormMapping";
+import { reverbMapper } from "./reverb";
 
-describe("reverbAdapter", () => {
+describe("reverbMapper", () => {
   it("returns Reverb-specific posting fields", () => {
     const listing = createListing({
       selectedPlatforms: ["reverb"],
@@ -36,7 +36,7 @@ describe("reverbAdapter", () => {
       imageNames: ["front.jpg"],
     });
 
-    const formatted = reverbAdapter.formatListing(listing);
+    const formatted = reverbMapper.createDraft(listing);
 
     expect(formatted.platform).toBe("Reverb");
     expect(formatted.fields.map((field) => field.label)).toEqual([
