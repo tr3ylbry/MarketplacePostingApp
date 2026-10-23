@@ -111,13 +111,56 @@ test("another authenticated user cannot read or edit a known foreign listing ID"
     await repository.create(other.id, listing);
     await page.goto("/listings");
     await expect(page.getByText(listing.title)).toHaveCount(0);
-    for (const suffix of ["", "/edit"]) {
+    for (const suffix of ["", "/edit", "/reverb"]) {
       await page.goto(`/listings/${listing.id}${suffix}`);
       await expect(page.getByRole("heading", { name: "Listing not found" })).toBeVisible();
       await expect(page.getByText(listing.title)).toHaveCount(0);
     }
     expect(await repository.getById(other.id, listing.id)).toEqual(listing);
   } finally { await repository.delete(other.id, listing.id); await helpers.deleteUser(other.id); }
+});
+
+test("explicit Reverb review creates one sandbox draft; ordinary saves never publish and repeats reconcile", async ({ page, request }) => {
+  const stats = async () => (await (await request.get("http://127.0.0.1:4312/stats", { headers: { "X-Test-Secret": process.env.TEST_REVERB_SECRET! } })).json()).posts as number;
+  const before = await stats();
+  await page.goto("/settings/integrations/reverb");
+  await expect(page.getByRole("heading", { name: "Reverb integration — SANDBOX" })).toBeVisible();
+  await page.getByLabel("Reverb Personal Access Token").fill(`fake-reverb-${userId}`);
+  await page.getByRole("button", { name: "Connect Reverb", exact: true }).click();
+  await expect(page.getByText(/Connected to Sandbox Test Shop/)).toBeVisible();
+  await expect(page.getByLabel("Reverb Personal Access Token")).toHaveValue("");
+  const listing = listingFixture({ title: "Reverb E2E guitar" }); ownedIds.add(listing.id);
+  const { DrizzleListingRepository } = await import("../src/infrastructure/repositories/drizzleListingRepository");
+  const { drizzle } = await import("drizzle-orm/node-postgres"); const schema = await import("../src/infrastructure/db/schema");
+  await new DrizzleListingRepository(drizzle(pool, { schema })).create(userId, listing);
+  await page.goto(`/listings/${listing.id}/edit`);
+  const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64");
+  await page.getByLabel("Upload photos").setInputFiles({ name: "reverb.png", mimeType: "image/png", buffer: fixture });
+  await expect(page.getByRole("button", { name: "Remove reverb.png", exact: true })).toBeEnabled();
+  await page.reload();
+  await page.getByLabel("Title", { exact: false }).first().fill("Reverb E2E updated guitar");
+  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+  expect(await stats()).toBe(before);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.goto(`/listings/${listing.id}/reverb`);
+    await page.getByLabel("Reverb category").selectOption({ label: "Guitars / Electric" });
+    await page.getByLabel("Reverb condition").selectOption({ label: "Good" });
+    await page.getByLabel("Reverb shipping").selectOption({ label: "Test shipping profile" });
+    await page.getByRole("button", { name: "Review Reverb Draft" }).click();
+    const review = page.getByRole("region", { name: "Reverb draft review" });
+    await expect(review).toContainText("Reverb E2E updated guitar"); await expect(review).toContainText("Sandbox Test Shop");
+    await expect(review).toContainText("250.00 USD"); await expect(review).toContainText("crosslist-");
+    expect(await stats()).toBe(before + attempt);
+    await page.getByRole("button", { name: "Create Reverb Draft", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Reverb draft saved locally");
+    expect(await stats()).toBe(before + 1);
+  }
+  const rows = await pool.query("SELECT status,published_at,external_listing_id,provider_environment FROM marketplace_listings WHERE listing_id=$1", [listing.id]);
+  expect(rows.rows).toHaveLength(1); expect(rows.rows[0]).toMatchObject({ status: "draft", published_at: null, provider_environment: "sandbox" });
+  expect(rows.rows[0].external_listing_id).toBeTruthy();
+  await page.goto("/settings/integrations/reverb"); await page.getByRole("button", { name: "Disconnect Reverb", exact: true }).click();
+  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
 });
 
 test("explicit local import persists and repeated import skips existing records", async ({ page }) => {
