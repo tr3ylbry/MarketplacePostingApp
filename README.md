@@ -1,8 +1,8 @@
 # Marketplace Posting Assistant
 
-Draft an item once, then preview and copy marketplace-specific fields for manual posting. The V2 foundation uses Next.js App Router and PostgreSQL/Drizzle, preserving the domain and pure marketplace mappers established in PR #1. This slice adds durable, owner-authorized images using Vercel Private Blob on top of Better Auth—not a product redesign.
+Draft an item once, preview marketplace-specific fields, and explicitly create a Reverb **draft** through your own connected account. The V2 foundation uses Next.js App Router, Better Auth, PostgreSQL/Drizzle and durable private images, preserving the domain and pure marketplace mappers established in PR #1.
 
-**No public deployment or marketplace API publishing is included.** Development and production-server scripts bind to loopback by default. Authentication is implemented, but public-launch hardening and operational setup remain separate work.
+**No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; other marketplaces remain manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
 
 ## Architecture
 
@@ -63,7 +63,15 @@ Each mapper exposes `validate(listing)` and `createDraft(listing)`. Incomplete l
 - Reverb checks brand, model, category, title, description, positive price and shipping rate (zero shipping is valid).
 - Craigslist and the combined OfferUp/Facebook preview retain their existing formatting/validation.
 
-Category suggestions are scaffolding, not authoritative marketplace taxonomy. There are no real HTTP publishing clients, synchronization jobs, or external listing creation calls.
+Category suggestions in manual previews remain scaffolding. The separate Reverb integration retrieves authoritative taxonomy and conditions; no network code was added to the pure mappers. There is no background synchronization or live publishing.
+
+### Reverb draft publishing (PR #5)
+
+Connect your own Personal Access Token at `/settings/integrations/reverb`, then choose **Prepare Reverb Draft** on a saved listing. Select real category/condition UUIDs and shipping, review the exact meaningful fields, and explicitly confirm **Create Reverb Draft**. Both server layers force `publish=false`. The default environment is Sandbox; Live mode is prominently labeled and is not permission to test against a live account.
+
+Tokens require `public`, `read_listings`, `write_listings`, and `read_profile` (shop identity/profiles). PostgreSQL stores only AES-256-GCM encrypted credentials under a dedicated server key. Owner-scoped short transactions coordinate reviews/attempts and publication identity; all Reverb network calls and private photo signing run outside transactions. Stable SKU lookup with `state=all` reconciles retries before any POST. Temporary private photo URLs expire after 15 minutes and are never persisted or returned in reviews. Existing 60-second browser reads are unchanged.
+
+See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). The new migration adds encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it does not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft/photo ingestion validation remains pending credentials, not claimed by the fake-service tests.
 
 ## Routes and images
 
@@ -109,7 +117,7 @@ Cleanup records remain until upload capabilities expire plus a one-minute grace 
 4. If local OIDC is unavailable, put `BLOB_READ_WRITE_TOKEN` only in ignored server-side configuration, never `NEXT_PUBLIC_`, client code, logs or PRs.
 5. Apply migrations, sign in and test a disposable listing's upload/read/reload/delete with the matching private store. This repository provisions no Vercel infrastructure.
 
-References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-sdk), [private storage](https://vercel.com/docs/vercel-blob/private-storage). **Provider integration implemented and covered at the adapter boundary; real Vercel Blob smoke test remains pending.** No development credentials were available for this slice.
+References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-sdk), [private storage](https://vercel.com/docs/vercel-blob/private-storage). PR #4 passed a real development PRIVATE Blob smoke test (upload, durable read, reorder, deletion, cleanup and transaction boundaries) before merging. Reverb's separate ingestion of temporary private photo URLs still requires its own Sandbox smoke test.
 
 ### Storage tests
 
@@ -197,10 +205,10 @@ npm run check            # All of the above, including production build and E2E
 
 GitHub Actions uses an ephemeral PostgreSQL service for pull requests and pushes to `main`/`tbryant/dev`. It runs install, lint, typecheck, unit tests, integration tests, production build and Chromium E2E. Failure traces are retained briefly. No personal database or deployment credentials are used.
 
-Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage lifecycle tests and four Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. Exact final results are recorded in the PR.
+Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb lifecycle tests and five Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312 with real application/server/database boundaries: connect, review, explicit draft, persistence and duplicate reconciliation, plus zero provider writes on ordinary saves. Production never resolves the test gateway. Exact final results are recorded in the PR.
 
 ## Intentionally deferred
 
-Export/backup UX, pagination, richer category confirmation, marketplace API clients, background synchronization and product polish remain separate work. No teams, roles/admin UI, billing, AI, queues, Redis, public deployment or desktop/mobile packaging are included. Auth rate limiting is in-process; multi-instance rate limits, sanitized operational monitoring, secret rotation, session/token housekeeping and public-launch configuration need a later operational pass. Signing out revokes the current session, not every device. There is no account-deletion UI. The next proposed PR is one narrowly scoped real marketplace publishing integration, only after this slice is reviewed and merged. Account-wide media quotas, automated cleanup scheduling, image scanning/EXIF removal, and streaming large ZIP bundles remain deferred.
+Export/backup UX, pagination, live publishing, other marketplace clients, background synchronization and product polish remain separate work. No teams, roles/admin UI, billing, AI, queues, Redis, public deployment or desktop/mobile packaging are included. Auth rate limiting is in-process; multi-instance rate limits, sanitized operational monitoring, secret rotation, session/token housekeeping and public-launch configuration need a later operational pass. Signing out revokes the current session, not every device. There is no account-deletion UI. Account-wide media quotas, automated cleanup scheduling, image scanning/EXIF removal, and streaming large ZIP bundles remain deferred. Consider a focused reconciliation/operational UX pass only after Reverb Sandbox validation and review of this slice.
 
 Dependency audit reports four moderate entries from Drizzle Kit's transitive legacy esbuild loader (one underlying advisory). Drizzle Kit is development tooling, but Better Auth declares it as an optional peer, so npm now also reports this chain with `--omit=dev`. The app does not import Drizzle Kit or run that esbuild development server. Keep database tooling local and review the deployed dependency artifact before any public launch. Revisit when a compatible stable Drizzle Kit update removes the dependency; the audit's suggested breaking downgrade is not applied.
