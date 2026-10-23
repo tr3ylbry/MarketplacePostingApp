@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, numeric, timestamp, jsonb, integer, index, uniqueIndex, check, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp, jsonb, integer, index, uniqueIndex, check, pgEnum, boolean, primaryKey } from "drizzle-orm/pg-core";
+import type { ReverbSelection } from "../../application/reverbRepository";
 import { users } from "./authSchema";
 export { users, sessions, accounts, verifications } from "./authSchema";
 
@@ -59,7 +60,30 @@ export const marketplaceListings = pgTable("marketplace_listings", {
   externalListingId: text("external_listing_id"), externalUrl: text("external_url"),
   priceOverrideAmount: numeric("price_override_amount"), priceOverrideCurrency: text("price_override_currency"),
   publishedAt: instant("published_at"), lastSyncedAt: instant("last_synced_at"),
+  providerEnvironment: text("provider_environment"), providerShopId: text("provider_shop_id"),
 }, table => [
   index("publications_listing_idx").on(table.listingId),
   check("publication_price_valid", sql`(${table.priceOverrideAmount} IS NULL AND ${table.priceOverrideCurrency} IS NULL) OR (${table.priceOverrideAmount} IS NOT NULL AND ${table.priceOverrideCurrency} IS NOT NULL AND ${table.priceOverrideAmount} >= 0 AND ${table.priceOverrideAmount} < 'Infinity'::numeric AND ${table.priceOverrideCurrency} = 'USD')`),
 ]);
+
+export const reverbEnvironment = pgEnum("reverb_environment", ["sandbox", "live"]);
+export const reverbConnections = pgTable("reverb_connections", {
+  ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  environment: reverbEnvironment("environment").notNull(), version: text("version").notNull(),
+  encryptedToken: text("encrypted_token").notNull(), iv: text("iv").notNull(), authTag: text("auth_tag").notNull(),
+  shopId: text("shop_id").notNull(), shopName: text("shop_name").notNull(),
+  connectedAt: instant("connected_at").notNull(), updatedAt: instant("updated_at").notNull(),
+  needsReconnect: boolean("needs_reconnect").notNull().default(false),
+}, t => [primaryKey({ columns: [t.ownerId, t.environment] })]);
+
+// Explicit operation state, not a queue. postAttempted survives process failure
+// and new reviews: absence after an ambiguous POST is not proof it failed.
+export const reverbDraftRequests = pgTable("reverb_draft_requests", {
+  listingId: text("listing_id").notNull().references(() => listings.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  environment: reverbEnvironment("environment").notNull(), shopId: text("shop_id").notNull(),
+  id: text("review_id").notNull().unique(), connectionVersion: text("connection_version").notNull(),
+  listingVersion: instant("listing_version").notNull(), selection: jsonb("selection").$type<ReverbSelection>().notNull(),
+  expiresAt: instant("expires_at").notNull(), leaseUntil: instant("lease_until"), attemptId: text("attempt_id"),
+  postAttempted: boolean("post_attempted").notNull().default(false), externalId: text("external_id"),
+}, t => [primaryKey({ columns: [t.listingId, t.environment] }), index("reverb_requests_owner_idx").on(t.ownerId)]);

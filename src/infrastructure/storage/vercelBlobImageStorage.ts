@@ -1,6 +1,6 @@
 import { del, get, head, issueSignedToken, presignUrl } from "@vercel/blob";
 import { blobImageSourceSchema } from "../../domain/listingImage";
-import { ImageOperationError, matchesImageHeader, READ_TTL_MS, type ImageStorage, type ImageUpload } from "../../application/imageStorage";
+import { ImageOperationError, matchesImageHeader, READ_TTL_MS, PROVIDER_READ_TTL_MS, type ProviderImageAccess, type ImageStorage, type ImageUpload } from "../../application/imageStorage";
 
 // Credentials are resolved server-side by the SDK: OIDC + BLOB_STORE_ID preferred.
 // This module is only wired through application/server (server-only).
@@ -38,7 +38,11 @@ export class VercelBlobImageStorage implements ImageStorage {
   }
 
   async createReadAccess(pathname: string) {
-    const validUntil = Date.now() + READ_TTL_MS;
+    return this.signRead(pathname, READ_TTL_MS);
+  }
+  async createProviderReadAccess(pathname: string) { return this.signRead(pathname, PROVIDER_READ_TTL_MS); }
+  private async signRead(pathname: string, ttl: number) {
+    const validUntil = Date.now() + ttl;
     const token = await issueSignedToken({ pathname, operations: ["get"], validUntil, abortSignal: AbortSignal.timeout(15000) });
     return (await presignUrl(token, { pathname, operation: "get", access: "private", validUntil, useCache: false })).presignedUrl;
   }
@@ -46,4 +50,4 @@ export class VercelBlobImageStorage implements ImageStorage {
   async deleteObject(pathname: string) { await del(pathname, { abortSignal: AbortSignal.timeout(15000) }); }
 }
 
-export const imageStorage: ImageStorage = new VercelBlobImageStorage();
+export const imageStorage: ImageStorage & ProviderImageAccess = new VercelBlobImageStorage();
