@@ -53,7 +53,7 @@ describe("validated local persistence", () => {
     expect(migrated.askingPrice.amount).toBe(old.price);
     expect(migrated.acquisitionCost?.amount).toBe(150.25);
     expect(migrated.attributes.brand).toBe("Fender");
-    expect(migrated.images.map(image => image.source.name)).toEqual(old.imageNames);
+    expect(migrated.images.map(image => image.source.kind === "filename" ? image.source.name : image.source.originalFilename)).toEqual(old.imageNames);
     expect(migrated.images.map(image => image.order)).toEqual([0, 1]);
     expect(migrated.status).toBe("active");
     expect(migrated.marketplaceListings[0]).toMatchObject({ listingId: old.id, marketplace: "ebay", status: "needs-renewal", externalUrl: old.postingRecords[0].url });

@@ -1,29 +1,21 @@
 "use client";
 import { type CreateListingInput, validateListingInput } from "../listingFormInput";
 import { toFormInput } from "../listingFormMapping";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   type Listing,
   type PlatformSiteKey,
 } from "../../../domain/listing";
-import { buildListingPhotoBundle } from "../photoBundle";
-import {
-  preparePhotoUploadBatch,
-  processPhotoUploadBatch,
-  type PhotoConversionProgress,
-} from "../photoUploadProcessing";
-import type { ListingPhotoUpload } from "../types";
 
 interface ListingFormProps {
   hasSavedListings: boolean;
   mode: "create" | "edit";
   listing: Listing | null;
   onContinueToPreview: () => void;
-  photos: ListingPhotoUpload[];
   initialSelectedPlatforms: PlatformSiteKey[];
-  onCreate: (input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
-  onCreateAndExit: (input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
-  onUpdate: (listingId: string, input: CreateListingInput, photos: ListingPhotoUpload[]) => Promise<boolean>;
+  onCreate: (input: CreateListingInput) => Promise<boolean>;
+  onCreateAndExit: (input: CreateListingInput) => Promise<boolean>;
+  onUpdate: (listingId: string, input: CreateListingInput) => Promise<boolean>;
   onDelete: (listingId: string) => void;
   onExitToHome: () => void;
   onOpenManage: () => void;
@@ -168,7 +160,6 @@ export function ListingForm({
   mode,
   listing,
   onContinueToPreview,
-  photos: selectedListingPhotos,
   initialSelectedPlatforms,
   onCreate,
   onCreateAndExit,
@@ -182,41 +173,11 @@ export function ListingForm({
     buildInitialState(listing, initialSelectedPlatforms),
   );
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [photos, setPhotos] = useState<ListingPhotoUpload[]>([]);
-  const [orderedPhotoIds, setOrderedPhotoIds] = useState<string[]>([]);
-  const [photoOrderHistory, setPhotoOrderHistory] = useState<string[][]>([]);
-  const [draggedPhotoId, setDraggedPhotoId] = useState<string | null>(null);
-  const [dragOverPhotoId, setDragOverPhotoId] = useState<string | null>(null);
-  const [showPhotoOrdering, setShowPhotoOrdering] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
   const [hasSavedDraft, setHasSavedDraft] = useState(mode === "edit" && Boolean(listing));
   const [isDirty, setIsDirty] = useState(false);
-  const [isDownloadingBundle, setIsDownloadingBundle] = useState(false);
   const [showSavedToast, setShowSavedToast] = useState(false);
-  const [photoConversionProgress, setPhotoConversionProgress] = useState<PhotoConversionProgress>({
-    completed: 0,
-    total: 0,
-  });
-  const uploadBatchIdRef = useRef(0);
 
-  useEffect(() => {
-    setForm(buildInitialState(mode === "edit" ? listing : null, initialSelectedPlatforms));
-    setPhotos(mode === "edit" ? selectedListingPhotos : []);
-    setOrderedPhotoIds(mode === "edit" ? selectedListingPhotos.map((photo) => photo.id) : []);
-    setPhotoOrderHistory([]);
-    setDraggedPhotoId(null);
-    setDragOverPhotoId(null);
-    setShowPhotoOrdering(false);
-    setPhotoError(null);
-    setSubmitAttempted(false);
-    setShowExitModal(false);
-    setHasSavedDraft(mode === "edit" && Boolean(listing));
-    setIsDirty(false);
-    setIsDownloadingBundle(false);
-    setShowSavedToast(false);
-    setPhotoConversionProgress({ completed: 0, total: 0 });
-  }, [initialSelectedPlatforms, listing, mode, selectedListingPhotos]);
 
   useEffect(() => {
     if (!showSavedToast) {
@@ -232,31 +193,7 @@ export function ListingForm({
     };
   }, [showSavedToast]);
 
-  const orderedPhotos = useMemo(() => {
-    const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
-    const arrangedPhotos = orderedPhotoIds
-      .map((photoId) => photoMap.get(photoId))
-      .filter((photo): photo is ListingPhotoUpload => Boolean(photo));
-
-    return arrangedPhotos;
-  }, [orderedPhotoIds, photos]);
-  const readyOrderedPhotos = useMemo(
-    () => orderedPhotos.filter((photo) => photo.status === "ready"),
-    [orderedPhotos],
-  );
-  const isProcessingPhotos = photoConversionProgress.total > photoConversionProgress.completed;
-  const hasPhotoConversionErrors = photos.some((photo) => photo.status === "error");
-
-  const nextInput = useMemo<CreateListingInput>(
-    () => ({
-      ...form,
-      imageNames:
-        readyOrderedPhotos.length > 0
-          ? readyOrderedPhotos.map((photo) => photo.name)
-          : form.imageNames,
-    }),
-    [form, readyOrderedPhotos],
-  );
+  const nextInput = form;
 
   const validationErrors = useMemo(() => validateListingInput(nextInput), [nextInput]);
   const activeErrors = submitAttempted ? validationErrors : [];
@@ -307,149 +244,6 @@ export function ListingForm({
     updateField(field, normalizeCurrencyInput(value) as CreateListingInput[Key]);
   }
 
-  async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-    setIsDirty(true);
-    uploadBatchIdRef.current += 1;
-    const currentBatchId = uploadBatchIdRef.current;
-
-    try {
-      const { photoError: nextPhotoError, progress, uploads } = preparePhotoUploadBatch(files);
-
-      setPhotoError(nextPhotoError);
-      setPhotos((current) => {
-        for (const photo of current) {
-          if (photo.previewUrl) {
-            URL.revokeObjectURL(photo.previewUrl);
-          }
-        }
-
-        return uploads;
-      });
-      setOrderedPhotoIds(uploads.map((file) => file.id));
-      setPhotoOrderHistory([]);
-      setDraggedPhotoId(null);
-      setDragOverPhotoId(null);
-      setPhotoConversionProgress(progress);
-
-      processPhotoUploadBatch(
-        uploads,
-        (nextProgress) => {
-          if (uploadBatchIdRef.current !== currentBatchId) {
-            return;
-          }
-
-          setPhotoConversionProgress(nextProgress);
-        },
-        (uploadId, nextUpload) => {
-          if (uploadBatchIdRef.current !== currentBatchId) {
-            if (nextUpload.previewUrl) {
-              URL.revokeObjectURL(nextUpload.previewUrl);
-            }
-            return;
-          }
-
-          setPhotos((current) =>
-            current.map((photo) => {
-              if (photo.id !== uploadId) {
-                return photo;
-              }
-
-              if (photo.previewUrl && photo.previewUrl !== nextUpload.previewUrl) {
-                URL.revokeObjectURL(photo.previewUrl);
-              }
-
-              return nextUpload;
-            }),
-          );
-        },
-      ).catch(() => {
-        if (uploadBatchIdRef.current !== currentBatchId) {
-          return;
-        }
-
-        setPhotoError("One or more HEIC photos could not be converted to JPEG.");
-      });
-    } catch {
-      setPhotoError("One or more HEIC photos could not be converted to JPEG.");
-    }
-  }
-
-  function reorderPhotoIds(currentOrder: string[], sourceId: string, targetId: string) {
-    if (sourceId === targetId) {
-      return currentOrder;
-    }
-
-    const nextOrder = [...currentOrder];
-    const sourceIndex = nextOrder.indexOf(sourceId);
-    const targetIndex = nextOrder.indexOf(targetId);
-
-    if (sourceIndex === -1 || targetIndex === -1) {
-      return currentOrder;
-    }
-
-    const [movedPhotoId] = nextOrder.splice(sourceIndex, 1);
-    nextOrder.splice(targetIndex, 0, movedPhotoId);
-
-    return nextOrder;
-  }
-
-  function handlePhotoDragStart(photoId: string) {
-    setDraggedPhotoId(photoId);
-    setDragOverPhotoId(photoId);
-  }
-
-  function handlePhotoDragOver(event: DragEvent<HTMLButtonElement>, photoId: string) {
-    event.preventDefault();
-
-    if (!draggedPhotoId || draggedPhotoId === photoId) {
-      return;
-    }
-
-    setDragOverPhotoId(photoId);
-  }
-
-  function handlePhotoDrop(photoId: string) {
-    if (!draggedPhotoId || draggedPhotoId === photoId) {
-      setDraggedPhotoId(null);
-      setDragOverPhotoId(null);
-      return;
-    }
-
-    setOrderedPhotoIds((current) => {
-      const nextOrder = reorderPhotoIds(current, draggedPhotoId, photoId);
-
-      if (nextOrder === current) {
-        return current;
-      }
-
-      setPhotoOrderHistory((history) => [...history, current]);
-      return nextOrder;
-    });
-    setIsDirty(true);
-    setDraggedPhotoId(null);
-    setDragOverPhotoId(null);
-  }
-
-  function handlePhotoDragEnd() {
-    setDraggedPhotoId(null);
-    setDragOverPhotoId(null);
-  }
-
-  function undoPhotoOrder() {
-    setPhotoOrderHistory((history) => {
-      const previousOrder = history[history.length - 1];
-
-      if (!previousOrder) {
-        return history;
-      }
-
-      setOrderedPhotoIds(previousOrder);
-      setIsDirty(true);
-      return history.slice(0, -1);
-    });
-  }
-
   function handleDelete() {
     if (!listing) {
       return;
@@ -470,7 +264,6 @@ export function ListingForm({
       const saved = await onUpdate(
         listing.id,
         nextInput,
-        readyOrderedPhotos.length > 0 ? readyOrderedPhotos : selectedListingPhotos,
       );
       if (!saved) return;
       setHasSavedDraft(true);
@@ -479,7 +272,7 @@ export function ListingForm({
       return;
     }
 
-    if (!await onCreate(nextInput, readyOrderedPhotos)) return;
+    if (!await onCreate(nextInput)) return;
     setHasSavedDraft(true);
     setIsDirty(false);
     setShowSavedToast(true);
@@ -502,37 +295,13 @@ export function ListingForm({
       return;
     }
 
-    if (!await onCreateAndExit(nextInput, readyOrderedPhotos)) return;
+    if (!await onCreateAndExit(nextInput)) return;
     setShowExitModal(false);
   }
 
-  async function handleBundleDownload() {
-    if (readyOrderedPhotos.length === 0) {
-      return;
-    }
-
-    setIsDownloadingBundle(true);
-
-    try {
-      const bundle = await buildListingPhotoBundle(nextInput, readyOrderedPhotos);
-      const url = URL.createObjectURL(bundle);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = `${form.title || "Listing"}_PhotoBundle.zip`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setIsDownloadingBundle(false);
-    }
-  }
-
-  const displayImageNames =
-    readyOrderedPhotos.length > 0 ? readyOrderedPhotos.map((photo) => photo.name) : form.imageNames;
   const canContinue = hasSavedDraft && !isDirty;
   const isSaveDisabled =
-    !isDirty || validationErrors.length > 0 || isProcessingPhotos || hasPhotoConversionErrors;
-  const photoInputId = `listing-photo-input-${mode}`;
+    !isDirty || validationErrors.length > 0;
 
   return (
     <>
@@ -943,156 +712,7 @@ export function ListingForm({
             </section>
           ) : null}
 
-          <section className="form-section">
-            <div className="form-section-header">
-              <h3>Photos</h3>
-            </div>
-
-            <div className="field-row single">
-              <label>
-                <RequiredLabel label="Photos" />
-                <div className="file-input-stack">
-                  <input
-                    accept="image/*,.heic,.heif"
-                    className="visually-hidden-file-input"
-                    id={photoInputId}
-                    multiple
-                    onChange={handleImageChange}
-                    type="file"
-                  />
-                  <label className="file-picker-button" htmlFor={photoInputId}>
-                    Choose Files
-                  </label>
-                  <p className="file-picker-copy">
-                    {photos.length > 0
-                      ? `${photos.length} photo${photos.length === 1 ? "" : "s"} selected`
-                      : "Upload up to 40 photos"}
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            {photos.length > 0 ? (
-              <div className="photo-toolbar">
-                <span className="summary-pill">
-                  {photos.length > 0 ? `${photos.length} In Order` : "No Photos"}
-                </span>
-                <button
-                  className="secondary-button"
-                  onClick={() => setShowPhotoOrdering((current) => !current)}
-                  type="button"
-                >
-                  {showPhotoOrdering ? "Hide Photo Order" : "Order Photos"}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={photoOrderHistory.length === 0}
-                  onClick={undoPhotoOrder}
-                  type="button"
-                >
-                  Undo
-                </button>
-                {hasSavedDraft ? (
-                  <button
-                    className="secondary-button"
-                    disabled={readyOrderedPhotos.length === 0 || isDownloadingBundle || isProcessingPhotos}
-                    onClick={handleBundleDownload}
-                    type="button"
-                  >
-                    {isDownloadingBundle ? "Building Bundle..." : "Download Photo Bundle"}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
-            {photoConversionProgress.total > 0 ? (
-              <div className="conversion-progress-card">
-                <div className="conversion-progress-header">
-                  <strong>
-                    {isProcessingPhotos
-                      ? `Converting ${photoConversionProgress.completed}/${photoConversionProgress.total} Images...`
-                      : `Converted ${photoConversionProgress.total}/${photoConversionProgress.total} Images`}
-                  </strong>
-                  <span>
-                    {Math.round(
-                      (photoConversionProgress.completed / photoConversionProgress.total) * 100,
-                    )}
-                    %
-                  </span>
-                </div>
-                <div aria-hidden="true" className="conversion-progress-bar">
-                  <span
-                    className="conversion-progress-fill"
-                    style={{
-                      width: `${(photoConversionProgress.completed / photoConversionProgress.total) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {showPhotoOrdering && photos.length > 0 ? (
-              <div className="photo-order-panel">
-                <p className="photo-order-copy">
-                  Drag photos to set upload order from most important to least important.
-                  The arranged order is what each marketplace will use first.
-                </p>
-                <div className="photo-grid">
-                  {orderedPhotos.map((photo) => {
-                    const isDragged = draggedPhotoId === photo.id;
-                    const isDropTarget = dragOverPhotoId === photo.id && draggedPhotoId !== photo.id;
-
-                    return (
-                      <button
-                        className={`photo-tile ranked ${isDragged ? "dragging" : ""} ${isDropTarget ? "drag-over" : ""}`}
-                        draggable
-                        onDragEnd={handlePhotoDragEnd}
-                        onDragOver={(event) => handlePhotoDragOver(event, photo.id)}
-                        onDragStart={() => handlePhotoDragStart(photo.id)}
-                        onDrop={() => handlePhotoDrop(photo.id)}
-                        key={photo.id}
-                        type="button"
-                      >
-                        {photo.previewUrl ? (
-                          <img alt={photo.name} src={photo.previewUrl} />
-                        ) : (
-                          <div className={`photo-preview-placeholder ${photo.status}`}>
-                            {photo.status === "converting" ? (
-                              <span className="photo-spinner" aria-hidden="true" />
-                            ) : (
-                              <span className="photo-error-badge">Failed</span>
-                            )}
-                          </div>
-                        )}
-                        <span className="photo-name">{photo.name}</span>
-                        {photo.status === "converting" ? (
-                          <span className="photo-status-text">Converting...</span>
-                        ) : null}
-                        {photo.status === "error" ? (
-                          <span className="photo-status-text error">
-                            {photo.errorMessage ?? "Conversion failed"}
-                          </span>
-                        ) : null}
-                        <span className="photo-drag-badge">Drag</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            {displayImageNames.length > 0 ? (
-              <div className="image-chip-row">
-                {displayImageNames.map((imageName, index) => (
-                  <span className="image-chip" key={`${imageName}-${index}`}>
-                    {index + 1}. {imageName}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {photoError ? <p className="photo-error">{photoError}</p> : null}
-          </section>
+          {!listing ? <p>Save this listing to upload persistent photos.</p> : null}
 
           <div className="form-footer-actions">
             <button className="primary-button" disabled={isSaveDisabled} type="submit">

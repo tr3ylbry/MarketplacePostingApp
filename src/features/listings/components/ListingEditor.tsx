@@ -7,25 +7,21 @@ import { ListingForm } from "./ListingForm";
 import { MarketplacePicker } from "./MarketplacePicker";
 import { toDomainInput } from "../listingFormMapping";
 import type { CreateListingInput } from "../listingFormInput";
-import type { ListingPhotoUpload } from "../types";
-import { useSessionPhotos } from "./SessionPhotos";
+import { ImageGallery } from "./ImageGallery";
 
-const noPhotos: ListingPhotoUpload[] = [];
 export function ListingEditor({ initialListing }: { initialListing: Listing | null }) {
   const router = useRouter();
-  const sessionPhotos = useSessionPhotos();
   const [listing, setListing] = useState(initialListing);
   const [platforms, setPlatforms] = useState<PlatformSiteKey[]>(initialListing?.selectedPlatforms ?? []);
   const [choosing, setChoosing] = useState(!initialListing);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function save(input: CreateListingInput, photos: ListingPhotoUpload[], exit = false) {
+  async function save(input: CreateListingInput, exit = false) {
     setPending(true); setError(null);
     try {
       const payload = { ...toDomainInput(input), imageNames: input.imageNames };
       const result = listing ? await updateListingAction(listing.id, payload, listing.updatedAt) : await createListingAction(payload);
       if (!result.ok) { setError(result.error); return false; }
-      sessionPhotos.set(result.data.id, photos);
       setListing(result.data);
       if (exit) router.push("/listings");
       else if (!listing) router.replace(`/listings/${encodeURIComponent(result.data.id)}/edit`);
@@ -44,17 +40,16 @@ export function ListingEditor({ initialListing }: { initialListing: Listing | nu
     finally { setPending(false); }
   }
   if (choosing) return <MarketplacePicker selectedPlatforms={platforms} onToggle={platform => setPlatforms(current => current.includes(platform) ? current.filter(value => value !== platform) : [...current, platform])} onContinue={() => setChoosing(false)} />;
-  const photos = listing ? sessionPhotos.get(listing.id) ?? noPhotos : noPhotos;
   return <>
     {error ? <p role="alert">{error}</p> : null}
     {pending ? <p role="status">Saving changes…</p> : null}
-    {listing?.images.length && !photos.length ? <p>Only filenames are saved. Re-select image files to preview or download them in this session.</p> : null}
     <fieldset disabled={pending} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <ListingForm listing={listing} mode={listing ? "edit" : "create"} photos={photos} initialSelectedPlatforms={platforms} hasSavedListings
-        onCreate={(input, files) => save(input, files)} onUpdate={(_id, input, files) => save(input, files)}
-        onCreateAndExit={(input, files) => save(input, files, true)} onDelete={remove}
+      <ListingForm listing={listing} mode={listing ? "edit" : "create"} initialSelectedPlatforms={platforms} hasSavedListings
+        onCreate={input => save(input)} onUpdate={(_id, input) => save(input)}
+        onCreateAndExit={input => save(input, true)} onDelete={remove}
         onContinueToPreview={() => { if (listing) router.push(`/listings/${encodeURIComponent(listing.id)}`); }}
         onExitToHome={() => router.push("/listings")} onOpenManage={() => router.push("/listings")} onStartCreate={() => router.push("/listings/new")} />
     </fieldset>
+    {listing ? <ImageGallery listing={listing} onChange={setListing} disabled={pending} /> : null}
   </>;
 }

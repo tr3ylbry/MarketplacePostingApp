@@ -1,8 +1,8 @@
 # Marketplace Posting Assistant
 
-Draft an item once, then preview and copy marketplace-specific fields for manual posting. The V2 foundation uses Next.js App Router and PostgreSQL/Drizzle, preserving the domain and pure marketplace mappers established in PR #1. This slice adds GitHub authentication and structural, server-enforced listing ownership—not a product redesign.
+Draft an item once, then preview and copy marketplace-specific fields for manual posting. The V2 foundation uses Next.js App Router and PostgreSQL/Drizzle, preserving the domain and pure marketplace mappers established in PR #1. This slice adds durable, owner-authorized images using Vercel Private Blob on top of Better Auth—not a product redesign.
 
-**No public deployment, object storage or marketplace API publishing is included.** Development and production-server scripts bind to loopback by default. Authentication is implemented, but public-launch hardening and operational setup remain separate work.
+**No public deployment or marketplace API publishing is included.** Development and production-server scripts bind to loopback by default. Authentication is implemented, but public-launch hardening and operational setup remain separate work.
 
 ## Architecture
 
@@ -38,18 +38,18 @@ PostgreSQL stores three listing persistence areas, plus the auth library's `user
 | Table | Contents |
 | --- | --- |
 | `listings` | Required owner foreign key, canonical fields, USD numeric amounts, lifecycle, JSONB attributes/preferences, selected marketplace enum array, timestamps |
-| `listing_images` | Stable image ID, listing foreign key, filename source metadata, unique ordered position, optional alt text |
+| `listing_images` | Stable image ID, listing foreign key, storage provider/pathname, original filename, MIME, byte size, uploaded timestamp, unique ordered position, optional alt text |
 | `marketplace_listings` | Publication ID, listing foreign key, marketplace/status enums, optional external details, price override and timestamps |
 
 Foreign keys cascade on listing deletion. Image positions are unique per listing; publication foreign keys and inventory ordering are indexed. Database checks reinforce USD and finite positive/nonnegative money rules. JSONB keeps optional category details pragmatic without a dynamic schema engine; the domain schema validates their structure on writes and reads. Text IDs preserve valid historical local IDs. Numeric columns map explicitly to the existing JavaScript-number Money model, not an accounting/decimal arithmetic framework.
 
-Creates, edits and imports are transactional across all three tables. Edits use an expected `updatedAt` version to reject stale writes instead of silently losing changes. Import skips existing canonical IDs without overwriting them; conflicting child IDs roll back the batch. Normal deletion is permanent with confirmation, matching the existing workflow. No archive UI has been added.
+Creates and imports are transactional across all three listing tables. Ordinary product edits preserve images; dedicated image mutations serialize on the owned parent and advance its edit version. Edits use an expected `updatedAt` version to reject stale writes instead of silently losing changes. Import skips existing canonical IDs without overwriting them; conflicting child IDs roll back the batch. Normal deletion is permanent with confirmation, matching the existing workflow. No archive UI has been added.
 
 ### Authentication and authorization
 
 [Better Auth](https://better-auth.com/docs/integrations/next) with its official [Drizzle adapter](https://better-auth.com/docs/adapters/drizzle) provides one GitHub OAuth flow and database-backed sessions. It fits the current App Router/PostgreSQL stack without custom password or session cryptography. Internal UUID user IDs—not email addresses or GitHub display names—own listings. Account linking and password authentication are disabled.
 
-Every protected page and server action validates the session on the server. Services and repository methods require the trusted owner ID explicitly; browser-supplied ownership fields are stripped by validation. Inventory and individual reads filter by owner. SQL updates include owner, listing ID **and** expected timestamp; deletes include owner and ID. Child images/publications are accessed only through an authorized aggregate. There are no child-by-ID mutation endpoints. PostgreSQL requires a non-null owner foreign key and indexes owner/inventory ordering; deleting a user with listings is restricted.
+Every protected page and server action validates the session on the server. Services and repository methods require the trusted owner ID explicitly; browser-supplied ownership fields are stripped by validation. Inventory and individual reads filter by owner. SQL updates include owner, listing ID **and** expected timestamp; deletes include owner and ID. Image reads/mutations require both the owned parent and matching image/reservation. Publications remain aggregate-scoped. PostgreSQL requires a non-null owner foreign key and indexes owner/inventory ordering; deleting a user with listings is restricted.
 
 **Knowing another listing UUID is insufficient to access it.** Foreign detail/edit IDs return the same not-found screen as missing IDs. Foreign updates use the same conflict response as missing/stale listings; deletes use the same not-found response. Imports skip existing IDs regardless of owner, revealing no owner or listing details and never transferring ownership.
 
@@ -67,15 +67,61 @@ Category suggestions are scaffolding, not authoritative marketplace taxonomy. Th
 
 ## Routes and images
 
-`/` redirects to `/listings`. `/sign-in` offers GitHub sign-in; `/api/auth/[...all]` hosts the auth library handlers. Inventory is at `/listings`; creation at `/listings/new`; detail/previews at `/listings/[id]`; editing at `/listings/[id]/edit`. All listing routes and create/update/delete/import actions require a server-validated session; unauthenticated requests redirect to sign-in. Data is server-rendered; forms, confirmation, clipboard/preview navigation and file selection are client interactions. The account name and sign-out button are the only account UI. Sign-out revokes the current session and performs a full navigation to clear user-specific router/photo state.
+`/` redirects to `/listings`. `/sign-in` offers GitHub sign-in; `/api/auth/[...all]` hosts the auth library handlers. Inventory is at `/listings`; creation at `/listings/new`; detail/previews at `/listings/[id]`; editing at `/listings/[id]/edit`. All listing routes and create/update/delete/import actions require a server-validated session; unauthenticated requests redirect to sign-in. Data is server-rendered; forms, confirmation, clipboard/preview navigation and file selection are client interactions. The account name and sign-out button are the only account UI. Sign-out revokes the current session and performs a full navigation to clear user-specific router state.
 
-**Only image filename metadata is durable.** Actual selected bytes, object URLs, HEIC conversions and photo bundles remain browser-session-only. The UI explicitly warns after reload that files must be selected again. PostgreSQL does not store image bytes and no object storage is implemented. Existing ordering, preview and bundle tools remain available when bytes exist in the session.
+**Vercel Private Blob stores bytes; PostgreSQL stores authoritative image metadata and order.** Save a listing first, then upload photos. Images survive reload. Earlier/Later controls reorder without re-uploading; Remove persists deletion. Photo bundles fetch durable images on demand. Global `SessionPhotos` and obsolete session-only ordering were removed; client state is limited to conversion/upload and UI feedback. Legacy filename entries clearly show that bytes are unavailable and are omitted from bundles.
+
+### Private media boundary
+
+```text
+Authenticated user → owner-scoped listing
+                         ├── prepare exact-path signed PUT → Vercel Private Blob
+                         └── verify uploaded object → PostgreSQL metadata
+
+GET /api/listings/[id]/images/[imageId]
+  → database-validated session → owner + parent/image lookup
+  → short-lived signed GET redirect → Vercel Private Blob
+```
+
+`ImageStorage` is a focused application interface; `VercelBlobImageStorage` contains all provider calls. SDK **@vercel/blob 2.8.2** uses `issueSignedToken` + `presignUrl`, `head`, bounded-prefix private `get`, and `del`. OIDC (`BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN`) is preferred; a server-only static credential is the local fallback. Marketplace mappers still consume stable domain metadata, never storage clients.
+
+The server generates a random image UUID and sanitized `images/{imageId}/{filename}` pathname. A **five-minute** reservation scopes one PUT to that exact path, MIME and declared maximum size, with overwrite and random provider suffixes disabled. The browser receives only a ready signed URL—not signing material or a full credential. Finalization rechecks ownership, expiry, object existence, exact size/type/path and image magic bytes before committing metadata. Repeated finalization is idempotent; ordinary form saves/imports cannot attach Blob paths.
+
+Reads issue **60-second** signed GETs with private/no-store redirect headers and no referrer. Images bypass Next's shared image optimizer (`unoptimized`). Expiring URLs are never stored in PostgreSQL. Knowing a pathname or image ID is insufficient. Signed URLs are temporary **bearer capabilities**: authorized recipients can share one until expiry, downloaded bytes cannot be revoked, and sign-out/deletion cannot instantly revoke an issued URL. Logs/proxies must redact query strings. The Retry image control requests fresh access.
+
+Limits: **40 images/listing** including legacy entries and unexpired reservations; **10 MiB/image**; filenames up to **255 characters**; JPEG/PNG/WebP only. HEIC/HEIF converts to JPEG before upload with accurate filename/type; conversion input is also capped at 10 MiB. SVG/GIF/BMP are not accepted. Signature checks are not full decoding, malware scanning, EXIF removal or decompression-bomb protection. Images get immutable paths rather than overwrites.
+
+### Migration, consistency and cleanup
+
+Migration `0002_glorious_thaddeus_ross` backfills historical JSON filename sources into explicit relational columns before removing the old column. IDs, names, positions and alt text survive. Domain sources discriminate `filename` from `vercel-blob`; no bytes are invented or matched by filename. Re-upload originals and remove obsolete entries deliberately. Image ownership derives from its parent, with no redundant owner column.
+
+Two small support tables hold `image_uploads` reservations and an `image_cleanup` retry ledger. Parent-row locking serializes capacity checks/order/delete; positions remain unique through transactional metadata replacement. Reservations expire after five minutes and are not visible saved images. Each reservation creates cleanup intent. Finalization resolves the owned reservation in a short transaction, verifies the object **outside any database transaction**, then locks/rechecks ownership, expiry and all verified metadata against the reservation in a new short commit transaction. That commit inserts metadata, removes reservation/cleanup records and advances the listing version. Concurrent finalizers recognize an already committed image without inserting duplicates. Provider checks have bounded timeouts; no cross-system ACID guarantee is claimed.
+
+If verification/DB finalization fails, compensation cancels the owned reservation and best-effort deletes the new object. A committed-image check prevents deleting a successful image after an ambiguous commit response. If PostgreSQL is unavailable, the ledger remains for retry. Image/listing deletion first commits metadata removal plus cleanup intent, then attempts Blob deletion using paths from trusted owned database records, including pending uploads. Failure leaves an orphan rather than a visible image pointing to missing bytes. Warnings never include raw provider errors, secrets or signed URLs.
+
+Cleanup records remain until upload capabilities expire plus a one-minute grace period—even after successful immediate deletion—to handle PUT replay. Run **`npm run images:cleanup`** explicitly with the intended database and matching Blob credentials. It processes at most 100 due entries: a short transaction refuses referenced images or reservations still within expiry/grace and claims an entry by advancing `notBefore` one minute; Blob deletion runs **outside the transaction**; a short completion transaction rechecks the lease, references and expiry before removing the entry/expired reservation. Failure or interruption leaves the lease for retry after it expires. A requeued or newer worker's entry is not removed by an older completion. Repeat until drained. This is an operator command, not an HTTP endpoint, queue or scheduled job. Abandoned uploads require this command. Back up/manage database and storage together; no bucket-wide deletion is performed.
+
+### Vercel setup (outside CI)
+
+1. Create/connect a **PRIVATE** Blob store to the Vercel project. Use separate disposable development/preview resources from production and verify environment access.
+2. Run `vercel link`, then `vercel env pull .env.local`. Back up existing local settings first: pulling can replace that file. Keep PostgreSQL and GitHub auth configured too.
+3. Verify server-only `BLOB_STORE_ID` and `VERCEL_OIDC_TOKEN` locally. Vercel supplies deployed OIDC for linked resources. Local OIDC expires; refresh with `vercel env pull .env.local`. Never commit pulled files.
+4. If local OIDC is unavailable, put `BLOB_READ_WRITE_TOKEN` only in ignored server-side configuration, never `NEXT_PUBLIC_`, client code, logs or PRs.
+5. Apply migrations, sign in and test a disposable listing's upload/read/reload/delete with the matching private store. This repository provisions no Vercel infrastructure.
+
+References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-sdk), [private storage](https://vercel.com/docs/vercel-blob/private-storage). **Provider integration implemented and covered at the adapter boundary; real Vercel Blob smoke test remains pending.** No development credentials were available for this slice.
+
+### Storage tests
+
+Unit/adapter tests mock the narrow SDK boundary; application/repository tests use deterministic in-memory bytes with real PostgreSQL ownership. Browser tests use a separate loopback capability server; no real Blob account or credentials are required.
+
+Only an explicit `MARKETPLACE_TEST_BUILD=1` build aliases the adapter to test storage, outputs `.next-test`, and requires a loopback `_test` database with no Vercel environment. Normal builds always resolve the real provider; setting test flags on a normal production artifact does not replace it. The test provider additionally requires a random per-run secret. There are no test upload/read/auth-bypass routes in the production app. Playwright creates genuine database sessions through its test-process-only auth helper. The test server must never be deployed.
 
 ## Import existing browser listings
 
 Use **Import local listings** on inventory. Nothing imports or deletes automatically. The compatibility reader validates V2 records or converts V1 records when no V2 key exists; malformed canonical records are skipped. Optional malformed legacy purchase/shipping money is omitted, known marketplace names normalize, unsupported publications are skipped, valid publication details survive, and invalid optional publication timestamps are omitted.
 
-The server validates the batch again and imports up to 100 valid records transactionally into the **currently authenticated account**, reporting imported/skipped counts. Payloads cannot set the owner. Repeated imports and IDs belonging to other accounts are skipped without overwrite or claim. Failure leaves the database batch and original local data unchanged. Existing V1/V2/recovery storage keys are never changed by this flow. On a shared browser, local records belong to that browser profile, not an auth account: review them before deliberately importing into the signed-in account.
+The server validates the batch again and imports up to 100 valid records transactionally into the **currently authenticated account**, reporting imported/skipped counts. Payloads cannot set the owner or attach Blob paths: local import accepts filename-only images. Repeated imports and IDs belonging to other accounts are skipped without overwrite or claim. Failure leaves the database batch and original local data unchanged. Existing V1/V2/recovery storage keys are never changed by this flow. On a shared browser, local records belong to that browser profile, not an auth account: review them before deliberately importing into the signed-in account.
 
 Browser storage is origin-specific. To import from a previous Vite origin such as `http://localhost:5173`, run this app at **that exact host and port** in the same browser profile (for example `npm run dev -- --hostname localhost --port 5173`), set `BETTER_AUTH_URL` to that origin and configure the corresponding GitHub OAuth callback. A different host, port or protocol cannot read those records. Back up important browser data first. Cross-origin export/import and batches above 100 are deferred.
 
@@ -135,7 +181,7 @@ docker compose exec postgres createdb -U marketplace marketplace_test
 npx playwright install chromium
 ```
 
-Set `TEST_DATABASE_URL` as shown in `.env.example`. Database tests refuse URLs whose database name does not end in `_test`; this guard is not a substitute for choosing a disposable database. Tests migrate it and clean up their own fixture records without truncating unrelated tables. The historical-data migration/claim test uses a separately generated schema. E2E starts a production server on port 3100 using the test URL, never a running development server.
+Set `TEST_DATABASE_URL` as shown in `.env.example`. Database tests refuse URLs whose database name does not end in `_test`; this guard is not a substitute for choosing a disposable database. Tests migrate it and clean up their own fixture records without truncating unrelated tables. The historical-data migration/claim test uses a separately generated schema. E2E builds an isolated `.next-test` production-mode server on port 3100 plus a disposable loopback storage server on port 4311, never a running development server.
 
 Auth tests use the library's documented [test utilities](https://better-auth.com/docs/plugins/test-utils) only in the test process to create real database sessions and signed cookies. Production configuration has no test plugin or login bypass. An ephemeral secret is shared with the E2E server; no personal GitHub/OAuth account is used. Integration tests cover absent/tampered/expired/revoked sessions, CSRF/callback rejection, OAuth initiation, two-user guessed IDs, spoofed owners, child-ID collisions, import retries and stale edits. Browser tests cover authenticated create/reload/edit/previews/delete/import, sign-out and unauthenticated/foreign routes. The real external GitHub consent/token exchange still needs a manual smoke test with your own development OAuth app; CI deliberately does not contact GitHub.
 
@@ -145,16 +191,16 @@ npm run typecheck         # Next route generation + strict TypeScript
 npm test                  # Domain, mappers, compatibility, service and React tests
 npm run test:integration  # Real PostgreSQL repository/migration/constraint tests
 npm run build
-npm run test:e2e          # Build first; Chromium create/reload/edit/preview/delete/import
+npm run test:e2e          # Builds isolated test app; Chromium workflows
 npm run check            # All of the above, including production build and E2E
 ```
 
 GitHub Actions uses an ephemeral PostgreSQL service for pull requests and pushes to `main`/`tbryant/dev`. It runs install, lint, typecheck, unit tests, integration tests, production build and Chromium E2E. Failure traces are retained briefly. No personal database or deployment credentials are used.
 
-This slice's validation covers 99 unit/component tests, 19 PostgreSQL integration tests and 4 Chromium workflows, in addition to lint, strict typecheck and the production build.
+Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage lifecycle tests and four Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. Exact final results are recorded in the PR.
 
 ## Intentionally deferred
 
-Real image storage, export/backup UX, pagination, richer category confirmation, marketplace API clients, background synchronization and product polish remain separate work. No teams, roles/admin UI, billing, AI, queues, Redis, public deployment or desktop/mobile packaging are included. Auth rate limiting is in-process; multi-instance rate limits, sanitized operational monitoring, secret rotation, session/token housekeeping and public-launch configuration need a later operational pass. Signing out revokes the current session, not every device. There is no account-deletion UI. The next proposed PR is owner-authorized persistent images/object storage, only after this slice is reviewed and merged.
+Export/backup UX, pagination, richer category confirmation, marketplace API clients, background synchronization and product polish remain separate work. No teams, roles/admin UI, billing, AI, queues, Redis, public deployment or desktop/mobile packaging are included. Auth rate limiting is in-process; multi-instance rate limits, sanitized operational monitoring, secret rotation, session/token housekeeping and public-launch configuration need a later operational pass. Signing out revokes the current session, not every device. There is no account-deletion UI. The next proposed PR is one narrowly scoped real marketplace publishing integration, only after this slice is reviewed and merged. Account-wide media quotas, automated cleanup scheduling, image scanning/EXIF removal, and streaming large ZIP bundles remain deferred.
 
 Dependency audit reports four moderate entries from Drizzle Kit's transitive legacy esbuild loader (one underlying advisory). Drizzle Kit is development tooling, but Better Auth declares it as an optional peer, so npm now also reports this chain with `--omit=dev`. The app does not import Drizzle Kit or run that esbuild development server. Keep database tooling local and review the deployed dependency artifact before any public launch. Revisit when a compatible stable Drizzle Kit update removes the dependency; the audit's suggested breaking downgrade is not applied.

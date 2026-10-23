@@ -1,5 +1,6 @@
 import { listingSchema, type Listing } from "../../domain/listing";
 import { listings, listingImages, marketplaceListings } from "../db/schema";
+import { imageFromRow, imageToRow } from "./imageMapping";
 
 export function listingToRows(value: Listing) {
   const listing = listingSchema.parse(value);
@@ -12,7 +13,7 @@ export function listingToRows(value: Listing) {
     attributes: listing.attributes, marketplaceDetails: listing.marketplaceDetails,
     selectedPlatforms: listing.selectedPlatforms, createdAt: listing.createdAt, updatedAt: listing.updatedAt,
   };
-  const images: (typeof listingImages.$inferInsert)[] = listing.images.map(image => ({ ...image, altText: image.altText ?? null }));
+  const images = listing.images.map(imageToRow);
   const publications: (typeof marketplaceListings.$inferInsert)[] = listing.marketplaceListings.map(publication => ({
     id: publication.id, listingId: publication.listingId, marketplace: publication.marketplace, status: publication.status,
     externalListingId: publication.externalListingId ?? null, externalUrl: publication.externalUrl ?? null,
@@ -35,7 +36,7 @@ export function listingFromRows(
     ...row, askingPrice: money(row.askingPriceAmount, row.currency),
     acquisitionCost: money(row.acquisitionCostAmount), shippingRate: money(row.shippingRateAmount),
     createdAt: date(row.createdAt), updatedAt: date(row.updatedAt),
-    images: [...images].sort((a, b) => a.order - b.order).map(image => ({ ...image, altText: image.altText ?? undefined })),
+    images: [...images].sort((a, b) => a.order - b.order).map(imageFromRow),
     marketplaceListings: publications.map(publication => ({
       ...publication, externalListingId: publication.externalListingId ?? undefined,
       externalUrl: publication.externalUrl ?? undefined,

@@ -29,24 +29,53 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await page.getByLabel("Brand", { exact: false }).first().fill("Fender");
   await page.getByLabel("Model", { exact: false }).first().fill("Strat");
   await page.getByLabel("Shipping Rate", { exact: false }).fill("0");
-  await page.locator('input[type="file"]').setInputFiles({ name: "front.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64") });
   await page.getByRole("button", { name: "Save Listing", exact: true }).click();
   await expect(page).toHaveURL(/\/listings\/[^/]+\/edit$/);
   const segments = page.url().split("/");
   ownedIds.add(segments[segments.length - 2]);
   const result = await pool.query<{ owner_id: string }>("SELECT owner_id FROM listings WHERE id = $1", [segments[segments.length - 2]]);
   expect(result.rows[0].owner_id).toBe(userId);
+  const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64");
+  await page.getByLabel("Upload photos").setInputFiles(["front.png", "rear.png"].map(name => ({ name, mimeType: "image/png", buffer: fixture })));
+  await expect(page.getByRole("button", { name: "Remove rear.png", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Download Photo Bundle" })).toBeEnabled();
   await page.reload();
   await expect(page.getByLabel("Title", { exact: false }).first()).toHaveValue("E2E Guitar");
-  await expect(page.getByText(/Only filenames are saved/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Download Photo Bundle" })).toHaveCount(0);
+  for (const name of ["front.png", "rear.png"]) {
+    await expect(page.getByRole("img", { name, exact: true })).toBeVisible();
+    await expect.poll(() => page.getByRole("img", { name, exact: true }).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  }
+  const images = page.locator("[data-image-id]");
+  const firstId = await images.first().getAttribute("data-image-id");
+  const foreignContext = await page.context().browser()!.newContext();
+  const helpers = (await auth.$context).test;
+  const other = await helpers.saveUser(helpers.createUser());
+  try {
+    const readPath = `/api/listings/${segments[segments.length - 2]}/images/${firstId}`;
+    expect((await foreignContext.request.get(`http://127.0.0.1:3100${readPath}`)).status()).toBe(401);
+    await foreignContext.addCookies(await helpers.getCookies({ userId: other.id }));
+    expect((await foreignContext.request.get(`http://127.0.0.1:3100${readPath}`)).status()).toBe(404);
+  } finally { await foreignContext.close(); await helpers.deleteUser(other.id); }
+  await page.getByLabel("Title", { exact: false }).first().fill("Unsaved while reordering");
+  await page.getByRole("button", { name: "Move rear.png earlier" }).click();
+  await expect(images.first()).toContainText("rear.png");
+  await expect(page.getByLabel("Title", { exact: false }).first()).toHaveValue("Unsaved while reordering");
+  await page.reload();
+  await expect(images.first()).toContainText("rear.png");
+  await page.getByRole("button", { name: "Remove rear.png", exact: true }).click();
+  await expect(images).toHaveCount(1);
+  await page.reload();
+  await expect(images).toHaveCount(1);
+  await expect(images.first()).toContainText("front.png");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Photo Bundle" }).click();
+  expect((await download).suggestedFilename()).toContain("PhotoBundle.zip");
   await page.getByLabel("Title", { exact: false }).first().fill("Edited E2E Guitar");
   await page.getByRole("button", { name: "Save Changes", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText("1 / 2")).toBeVisible();
-  await expect(page.getByText("1. front.png")).toBeVisible();
+  await expect(page.getByText("1. front.png").first()).toBeVisible();
   await page.getByRole("button", { name: "→", exact: true }).click();
   await expect(page.getByText(/Category is required for Reverb/)).toBeVisible();
   await page.reload();

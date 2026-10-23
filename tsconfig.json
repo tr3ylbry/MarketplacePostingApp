@@ -1,5 +1,10 @@
 {
   "compilerOptions": {
+    "paths": {
+      "@image-storage": [
+        "./src/infrastructure/storage/vercelBlobImageStorage.ts"
+      ]
+    },
     "target": "ES2020",
     "lib": [
       "ES2020",
@@ -34,7 +39,9 @@
     "e2e",
     "scripts",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-test/types/**/*.ts",
+    ".next-test/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

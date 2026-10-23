@@ -9,5 +9,5 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
   const user = await requireUser();
   const listing = await listingService().getListing(user.id, id);
   if (!listing) notFound();
-  return <ListingEditor key={`${listing.id}:${listing.updatedAt}`} initialListing={listing} />;
+  return <ListingEditor key={listing.id} initialListing={listing} />;
 }
