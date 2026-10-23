@@ -18,6 +18,8 @@ export const marketplaceListingSchema = z.object({
   priceOverride: moneySchema.optional(),
   publishedAt: z.iso.datetime().optional(),
   lastSyncedAt: z.iso.datetime().optional(),
+  providerEnvironment: z.enum(["sandbox", "live"]).optional(),
+  providerShopId: z.string().min(1).optional(),
 });
 export type MarketplaceListing = z.infer<typeof marketplaceListingSchema>;
 

@@ -1,5 +1,5 @@
 // Build-time-only replacement. Normal Next builds resolve the real adapter.
-import type { ImageStorage, ImageUpload } from "../../application/imageStorage";
+import type { ImageStorage, ImageUpload, ProviderImageAccess } from "../../application/imageStorage";
 import { blobImageSourceSchema } from "../../domain/listingImage";
 
 async function control(operation: string, payload: unknown): Promise<unknown> {
@@ -10,7 +10,8 @@ async function control(operation: string, payload: unknown): Promise<unknown> {
   if (!response.ok) throw new Error("Test storage operation failed.");
   return response.json();
 }
-export const imageStorage: ImageStorage = {
+export const imageStorage: ImageStorage & ProviderImageAccess = {
+  async createProviderReadAccess(pathname: string) { return String(await control("read", { pathname })); },
   async prepareUpload(upload: ImageUpload) { return String(await control("prepare", upload)); },
   async verifyUpload(upload: ImageUpload) { return blobImageSourceSchema.parse(await control("verify", upload)); },
   async createReadAccess(pathname: string) { return String(await control("read", { pathname })); },

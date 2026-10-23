@@ -9,6 +9,6 @@ if (testBuild) {
 }
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  ...(testBuild ? { distDir: ".next-test", turbopack: { resolveAlias: { "@image-storage": "./src/test/storage/testImageStorage.ts" } } } : {}),
+  ...(testBuild ? { distDir: ".next-test", turbopack: { resolveAlias: { "@image-storage": "./src/test/storage/testImageStorage.ts", "@reverb-gateway": "./src/test/reverb/testReverbGateway.ts" } } } : {}),
 };
 export default nextConfig;

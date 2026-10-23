@@ -14,9 +14,10 @@ const { listings, listingImages, imageUploads, imageCleanup } = schema;
 
 export async function lockOwnedListing(tx: Transaction, owner: string, listingId: string) {
   ownerIdSchema.parse(owner);
-  const [listing] = await tx.select({ id: listings.id }).from(listings)
+  const [listing] = await tx.select({ id: listings.id, updatedAt: listings.updatedAt }).from(listings)
     .where(and(eq(listings.id, listingId), eq(listings.ownerId, owner))).for("update");
   if (!listing) throw new ListingUnavailableError();
+  return listing;
 }
 async function touch(tx: Transaction, listingId: string) {
   await tx.update(listings).set({ updatedAt: sql`greatest(clock_timestamp(), ${listings.updatedAt} + interval '1 millisecond')` }).where(eq(listings.id, listingId));
