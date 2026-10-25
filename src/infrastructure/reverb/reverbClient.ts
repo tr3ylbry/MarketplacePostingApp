@@ -56,7 +56,8 @@ export class ReverbClient implements ReverbGateway {
     return { id: value.id, name: value.name, shippingProfiles: value.shipping_profiles };
   }
   async categories(token: string) {
-    const value = this.parse(z.object({ categories: z.array(z.object({ uuid: z.uuid(), full_name: label, listable: z.boolean() })) }), await this.call(token, "/api/categories/flat"));
+    // Reverb includes legacy GUIDs without RFC UUID version/variant bits.
+    const value = this.parse(z.object({ categories: z.array(z.object({ uuid: z.guid(), full_name: label, listable: z.boolean() })) }), await this.call(token, "/api/categories/flat"));
     return value.categories.filter(c => c.listable).map(c => ({ id: c.uuid, name: c.full_name }));
   }
   async conditions(token: string) {

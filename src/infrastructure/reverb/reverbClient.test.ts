@@ -20,6 +20,15 @@ describe("Reverb HTTP boundary", () => {
     expect(await client.categories(token)).toEqual([{ id: uuid, name: "Guitars / Electric" }]);
     expect(await client.conditions(token)).toEqual([{ id: uuid, name: "Good" }]);
   });
+  it("accepts provider-observed legacy category GUIDs without relaxing other fields", async () => {
+    const legacy = "12345678-abcd-0123-7123-123456789abc";
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ categories: [{ uuid: legacy, full_name: "Effects / Test", listable: true }] }));
+    expect(await new ReverbClient("sandbox", request).categories(token)).toEqual([{ id: legacy, name: "Effects / Test" }]);
+    for (const item of [{ uuid: "not-a-guid", full_name: "Test", listable: true }, { uuid: legacy, full_name: "", listable: true }, { uuid: legacy, full_name: "Test", listable: null }]) {
+      request.mockResolvedValueOnce(response({ categories: [item] }));
+      await expect(new ReverbClient("sandbox", request).categories(token)).rejects.toBeInstanceOf(ReverbProviderError);
+    }
+  });
   it("looks up exact SKU with state=all and refuses unsafe pagination", async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ listings: [remote], _links: {} })).mockResolvedValueOnce(response({ listings: [], _links: { next: { href: "https://evil.test/api/my/listings" } } }));
     const client = new ReverbClient("sandbox", request); expect(await client.findBySku(token, remote.sku)).toEqual([{ id: "123", sku: remote.sku, state: "draft" }]);

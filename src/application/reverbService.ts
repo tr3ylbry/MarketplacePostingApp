@@ -9,7 +9,7 @@ import type { ProviderImageAccess } from "./imageStorage";
 
 interface Cipher { encrypt(token: string, context: string): EncryptedCredential; decrypt(value: EncryptedCredential, context: string): string }
 const tokenSchema = z.string().trim().min(10).max(4096).regex(/^[\x21-\x7e]+$/);
-const choiceSchema = z.object({ categoryId: z.uuid(), conditionId: z.uuid(), shippingProfileId: z.string().max(200).optional() }).strict();
+const choiceSchema = z.object({ categoryId: z.guid(), conditionId: z.uuid(), shippingProfileId: z.string().max(200).optional() }).strict();
 export function safeReverbError(error: unknown): string {
   if (error instanceof ReverbProviderError || error instanceof ReverbDraftError || error instanceof ListingUnavailableError) return error.message;
   if (error instanceof z.ZodError) return "Invalid Reverb input. Check your selections and token format.";

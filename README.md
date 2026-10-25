@@ -71,7 +71,7 @@ Connect your own Personal Access Token at `/settings/integrations/reverb`, then 
 
 Tokens require `public`, `read_listings`, `write_listings`, and `read_profile` (shop identity/profiles). PostgreSQL stores only AES-256-GCM encrypted credentials under a dedicated server key. Owner-scoped short transactions coordinate reviews/attempts and publication identity; all Reverb network calls and private photo signing run outside transactions. Stable SKU lookup with `state=all` reconciles retries before any POST. Temporary private photo URLs expire after 15 minutes and are never persisted or returned in reviews. Existing 60-second browser reads are unchanged.
 
-See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). The new migration adds encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it does not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft/photo ingestion validation remains pending credentials, not claimed by the fake-service tests.
+See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). The new migration adds encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it does not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft creation, private photo ingestion, explicit shipping rates, duplicate reconciliation and remote draft deletion passed on 2026-10-24; CI continues to use isolated fakes.
 
 ## Routes and images
 
@@ -117,7 +117,7 @@ Cleanup records remain until upload capabilities expire plus a one-minute grace 
 4. If local OIDC is unavailable, put `BLOB_READ_WRITE_TOKEN` only in ignored server-side configuration, never `NEXT_PUBLIC_`, client code, logs or PRs.
 5. Apply migrations, sign in and test a disposable listing's upload/read/reload/delete with the matching private store. This repository provisions no Vercel infrastructure.
 
-References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-sdk), [private storage](https://vercel.com/docs/vercel-blob/private-storage). PR #4 passed a real development PRIVATE Blob smoke test (upload, durable read, reorder, deletion, cleanup and transaction boundaries) before merging. Reverb's separate ingestion of temporary private photo URLs still requires its own Sandbox smoke test.
+References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-sdk), [private storage](https://vercel.com/docs/vercel-blob/private-storage). PR #4 passed a real development PRIVATE Blob smoke test (upload, durable read, reorder, deletion, cleanup and transaction boundaries) before merging. PR #5 separately verified real Reverb Sandbox ingestion of two temporary private photo URLs on 2026-10-24.
 
 ### Storage tests
 

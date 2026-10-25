@@ -67,7 +67,7 @@ Shipping profiles are recommended and explicitly selectable by their real IDs. A
 
 ### Duplicate prevention and failure policy
 
-SKU is `crosslist-` plus the first 32 lowercase hex characters of SHA-256(canonical listing ID): stable, 41-character ASCII independent of product edits. Reverb's guide does not specify a maximum SKU length; real Sandbox acceptance remains a validation gate.
+SKU is `crosslist-` plus the first 32 lowercase hex characters of SHA-256(canonical listing ID): stable, 41-character ASCII independent of product edits. Reverb's guide does not specify a maximum SKU length; this representation was accepted in the real Sandbox smoke test on 2026-10-24.
 
 Each confirmed action first checks local publication identity and looks up the exact SKU using `state=all`. Pagination follows only same-host listing links preserving SKU/state, has a bounded page limit, and fails closed if incomplete. One matching draft is adopted, multiple matches require manual resolution, and local IDs cannot silently be replaced by a different remote ID. Legacy/imported external identities without authoritative environment/shop information require manual resolution.
 
@@ -97,7 +97,11 @@ CI needs no real Reverb credentials. A build-time-only `@reverb-gateway` alias w
 5. Prepare/confirm again and verify no second draft. Inspect owner denial and safe errors as practical.
 6. Delete only the disposable Sandbox draft (UI or documented `DELETE /api/listings/{id}`), delete the local listing/images, drain due image cleanup after its grace period, and disconnect the disposable connection as appropriate. Keep shared infrastructure. Do not delete unrelated resources.
 
-**Real Sandbox draft creation and photo ingestion are not yet validated.** Public Sandbox taxonomy/condition response shapes were inspected without credentials; that is not a substitute for the authenticated smoke test. Live-account testing is never implied by `REVERB_ENVIRONMENT=live` and requires explicit separate authorization. Live mode still forces draft-only behavior.
+**Real Sandbox draft creation and photo ingestion passed on 2026-10-24.** The local-only application used the real GitHub-backed session, encrypted Sandbox PAT and development PRIVATE Blob store. A disposable Boss DS-1 listing used real Distortion/Good selections, $50 USD price, explicit $10 US_CON shipping (zero shipping profiles), and two generated images. Reverb accepted `publish=false` with HTTP 202, returned a draft, and served both ingested images from its own image CDN with HTTP 200. Local publication identity/state matched, with `publishedAt` unset. A repeated confirmed action kept one remote SKU match and one observed create POST; an ordinary local title edit left the remote draft unchanged. Documented draft deletion returned HTTP 200 and subsequent SKU lookup returned zero matches.
+
+The real category response exposed one legacy 36-character hexadecimal GUID without RFC UUID version/variant bits. Category parsing and selection now accept GUID syntax while still validating names, listability and membership in freshly retrieved provider options. Condition IDs and local review IDs remain strict UUIDs. Synthetic adapter/application regression tests cover the observed shape and malformed/unknown categories.
+
+Live-account testing is never implied by `REVERB_ENVIRONMENT=live` and requires explicit separate authorization. Live mode still forces draft-only behavior.
 
 ## Deferred
 

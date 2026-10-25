@@ -90,6 +90,14 @@ it("requires real taxonomy/profile selections, while explicit zero-rate shipping
   const profile = await service.prepare(a, listingId, { ...choices, shippingProfileId: "profile-a" });
   expect(profile.payload.shipping_profile_id).toBe("profile-a"); expect(profile.payload.shipping).toBeUndefined();
 });
+it("accepts legacy provider category GUIDs only when returned by the provider", async () => {
+  const legacy = "12345678-abcd-0123-7123-123456789abc";
+  gateway.categories.mockResolvedValueOnce([{ id: legacy, name: "Effects / Test" }]);
+  const prepared = await service.prepare(a, listingId, { ...choices, categoryId: legacy });
+  expect(prepared.payload.categories).toEqual([{ uuid: legacy }]);
+  await expect(service.prepare(a, listingId, { ...choices, categoryId: legacy })).rejects.toThrow("selections");
+  await expect(service.prepare(a, listingId, { ...choices, categoryId: "not-a-guid" })).rejects.toThrow();
+});
 it("persists only draft identity, never acquisition cost, signed URLs or publishedAt", async () => {
   const prepared = await review(); expect(JSON.stringify(prepared)).not.toContain("signature");
   const result = await service.createDraft(a, prepared.reviewId);
