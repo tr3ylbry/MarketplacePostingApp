@@ -36,6 +36,13 @@
       "when": 1792976240911,
       "tag": "0004_provider_image_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792978823536,
+      "tag": "0005_reverb_draft_management",
+      "breakpoints": true
     }
   ]
 }

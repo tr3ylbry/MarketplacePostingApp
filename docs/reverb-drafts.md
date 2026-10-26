@@ -65,7 +65,21 @@ The connection key is dedicated, server-only, exactly 32 random bytes encoded as
 
 ### Taxonomy, shipping and review
 
-`/settings/integrations/reverb` connects/replaces/disconnects the current user's credential and clearly displays SANDBOX or LIVE. `/listings/[id]/reverb` retrieves actual listable `/api/categories/flat` UUIDs, authenticated `/api/listing_conditions`, and `/api/shop` shipping profiles. Nothing is silently preselected. Preparation resolves selections against fresh provider data, not labels supplied by the browser. The review displays shop, environment, title, make, model, year, finish, full description, category, condition, USD price, shipping, photo count and SKU. Changed listings/images/connections require a fresh review.
+`/settings/integrations/reverb` connects/replaces/disconnects the current user's credential and clearly displays SANDBOX or LIVE. Rendering `/listings/[id]/reverb` reads only local listing, connection and publication state: no shop, taxonomy or remote-status requests, including after hydration/navigation. **Load Reverb Options** explicitly retrieves actual listable `/api/categories/flat` UUIDs, authenticated `/api/listing_conditions`, and `/api/shop` shipping profiles. Nothing is silently preselected. Preparation resolves selections against fresh provider data, not labels supplied by the browser. The review displays shop, environment, title, make, model, year, finish, full description, category, condition, USD price, shipping, photo count and SKU. Changed listings/images/connections require a fresh review.
+
+### Manual draft management
+
+Migration `0005_reverb_draft_management.sql` adds nullable `providerState` and `providerCheckedAt` persistence. Existing rows remain unchecked (both null); no historical check is invented. Provider state is a bounded lowercase slug, separate from canonical listing lifecycle and generic publication status. `missing` is application-only and never accepted as a remote state.
+
+**Refresh Reverb Status** performs an owner-scoped, exact-SKU `state=all` lookup. One matching known ID refreshes state; a sole remote draft can be adopted when there is no active local identity. Non-drafts retain their identity and state without being labeled published or modified. Multiple matches and known-ID conflicts require manual resolution and leave the stored identity intact. Authentication failure requires reconnect; rate limiting and other failures remain safe errors, not automatic retries.
+
+**Delete Reverb Draft** requires confirmation and is offered only for a locally recorded draft. The server does not trust that display: it performs a fresh lookup, requires exactly one matching SKU and the expected confirmed ID with state `draft`, then sends one documented DELETE. A second lookup establishes the outcome, including after 404, timeout or 5xx. An uncertain response never causes a blind DELETE retry. A remaining draft keeps its linkage; a changed non-draft is recorded and must be managed on Reverb.
+
+Confirmed absence records `missing`, clears the **active** external ID/link and the confirmed create-attempt fence, and preserves the local listing, photos and account connection. This deliberately uses clearing rather than retaining historical IDs to avoid treating a deleted resource as active. A later explicitly reviewed create uses the same SKU and checks again before POSTing one replacement. An ambiguous POST that was never confirmed remains fenced even when lookup returns nothing; absence is not proof that an uncertain create failed.
+
+Short-lived `reverb_management_leases` coordinate refresh/delete with create claims under the listing's parent lock. No transaction stays open during provider HTTP. Expired workers are fenced by tokens; commits also recheck owner, listing version, connection version/shop and active identity. Reconciliation advances the local edit version, preventing stale form saves from overwriting new provider state. The lease table is operation coordination, not a queue or background service.
+
+There is no polling, background synchronization, remote content update/PUT, or automatic push on local edits. Navigation and ordinary saves never contact Reverb. Only explicit options, review, create, refresh and delete actions initiate provider traffic.
 
 Shipping profiles are recommended and explicitly selectable by their real IDs. Alternatively, an explicitly selected canonical `shippingRate` maps to `shipping.rates` for **US_CON (continental US only)**, including a valid zero rate. No guessed shipping profile or international shipping matrix is created. Unsupported optional fields (including videos/inventory/offers) are not sent.
 
@@ -109,4 +123,4 @@ Live-account testing is never implied by `REVERB_ENVIRONMENT=live` and requires 
 
 ## Deferred
 
-No live publishing, sync/update endpoint, orders, offers, messages, payouts, eBay API, Facebook automation, jobs, queues, AI, teams, billing or public deployment. Additional operational controls (PAT rotation automation, rate-limit scheduling, ambiguous-attempt operator UI, remote deletion UI and photo ingestion observability) are future focused work, not hidden background behavior.
+No live publishing, sync/update endpoint, orders, offers, messages, payouts, eBay API, Facebook automation, jobs, queues, AI, teams, billing or public deployment. Additional operational controls (PAT rotation automation, rate-limit scheduling, ambiguous-attempt operator UI and photo ingestion observability) are future focused work, not hidden background behavior.

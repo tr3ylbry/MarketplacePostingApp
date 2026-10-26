@@ -120,8 +120,8 @@ test("another authenticated user cannot read or edit a known foreign listing ID"
   } finally { await repository.delete(other.id, listing.id); await helpers.deleteUser(other.id); }
 });
 
-test("explicit Reverb review creates one sandbox draft; ordinary saves never publish and repeats reconcile", async ({ page, request }) => {
-  const stats = async () => (await (await request.get("http://127.0.0.1:4312/stats", { headers: { "X-Test-Secret": process.env.TEST_REVERB_SECRET! } })).json()).posts as number;
+test("explicit Reverb actions create, check, delete and replace; passive navigation and local saves never call Reverb", async ({ page, request }) => {
+  const stats = async () => await (await request.get("http://127.0.0.1:4312/stats", { headers: { "X-Test-Secret": process.env.TEST_REVERB_SECRET! } })).json() as { posts: number; deletes: number; calls: number; active: number };
   const before = await stats();
   await page.goto("/settings/integrations/reverb");
   await expect(page.getByRole("heading", { name: "Reverb integration — SANDBOX" })).toBeVisible();
@@ -141,9 +141,15 @@ test("explicit Reverb review creates one sandbox draft; ordinary saves never pub
   await page.getByLabel("Title", { exact: false }).first().fill("Reverb E2E updated guitar");
   await page.getByRole("button", { name: "Save Changes", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
-  expect(await stats()).toBe(before);
+  expect((await stats()).posts).toBe(before.posts);
   for (let attempt = 0; attempt < 2; attempt++) {
+    const passive = await stats();
     await page.goto(`/listings/${listing.id}/reverb`);
+    await expect(page.getByRole("heading", { name: "Reverb — SANDBOX" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Load Reverb Options" })).toBeEnabled();
+    expect(await stats()).toEqual(passive);
+    await page.getByRole("button", { name: "Load Reverb Options" }).click();
     await page.getByLabel("Reverb category").selectOption({ label: "Guitars / Electric" });
     await page.getByLabel("Reverb condition").selectOption({ label: "Good" });
     await page.getByLabel("Reverb shipping").selectOption({ label: "Test shipping profile" });
@@ -151,14 +157,43 @@ test("explicit Reverb review creates one sandbox draft; ordinary saves never pub
     const review = page.getByRole("region", { name: "Reverb draft review" });
     await expect(review).toContainText("Reverb E2E updated guitar"); await expect(review).toContainText("Sandbox Test Shop");
     await expect(review).toContainText("250.00 USD"); await expect(review).toContainText("crosslist-");
-    expect(await stats()).toBe(before + attempt);
+    expect((await stats()).posts).toBe(before.posts + attempt);
     await page.getByRole("button", { name: "Create Reverb Draft", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Reverb draft saved locally");
-    expect(await stats()).toBe(before + 1);
+    await expect(page.getByRole("status").filter({ hasText: "Reverb draft saved locally" })).toBeVisible();
+    expect((await stats()).posts).toBe(before.posts + 1);
   }
   const rows = await pool.query("SELECT status,published_at,external_listing_id,provider_environment FROM marketplace_listings WHERE listing_id=$1", [listing.id]);
   expect(rows.rows).toHaveLength(1); expect(rows.rows[0]).toMatchObject({ status: "draft", published_at: null, provider_environment: "sandbox" });
   expect(rows.rows[0].external_listing_id).toBeTruthy();
+  await page.getByRole("button", { name: "Refresh Reverb Status" }).click();
+  await expect(page.getByRole("status")).toContainText("Reverb status checked");
+  const refreshed = await pool.query("SELECT provider_state,provider_checked_at FROM marketplace_listings WHERE listing_id=$1", [listing.id]);
+  expect(refreshed.rows[0].provider_state).toBe("draft"); expect(refreshed.rows[0].provider_checked_at).toBeTruthy();
+  page.once("dialog", async dialog => { expect(dialog.message()).toContain("local MarketplacePostingApp listing and photos will remain"); await dialog.accept(); });
+  await page.getByRole("button", { name: "Delete Reverb Draft" }).click();
+  await expect(page.getByRole("status")).toContainText("Reverb draft is missing");
+  expect((await stats()).deletes).toBe(before.deletes + 1);
+  expect((await pool.query("SELECT id FROM listings WHERE id=$1", [listing.id])).rowCount).toBe(1);
+  expect((await pool.query("SELECT id FROM listing_images WHERE listing_id=$1", [listing.id])).rowCount).toBe(1);
+  expect((await pool.query("SELECT owner_id FROM reverb_connections WHERE owner_id=$1", [userId])).rowCount).toBe(1);
+  await page.getByRole("button", { name: "Load Reverb Options" }).click();
+  await page.getByLabel("Reverb category").selectOption({ label: "Guitars / Electric" });
+  await page.getByLabel("Reverb condition").selectOption({ label: "Good" });
+  await page.getByLabel("Reverb shipping").selectOption({ label: "Test shipping profile" });
+  await page.getByRole("button", { name: "Review Reverb Draft" }).click();
+  await page.getByRole("button", { name: "Create Reverb Draft", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Reverb draft saved locally" })).toBeVisible();
+  const replacement = await pool.query("SELECT external_listing_id FROM marketplace_listings WHERE listing_id=$1", [listing.id]);
+  expect(replacement.rows[0].external_listing_id).not.toBe(rows.rows[0].external_listing_id);
+  expect((await stats()).posts).toBe(before.posts + 2); expect((await stats()).active).toBe(before.active + 1);
+  const localOnly = await stats();
+  await page.goto(`/listings/${listing.id}/edit`);
+  await page.getByLabel("Title", { exact: false }).first().fill("Local change after Reverb draft");
+  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+  await page.goto(`/listings/${listing.id}/reverb`);
+  await expect(page.getByRole("button", { name: "Delete Reverb Draft" })).toBeEnabled();
+  expect(await stats()).toEqual(localOnly);
   await page.goto("/settings/integrations/reverb"); await page.getByRole("button", { name: "Disconnect Reverb", exact: true }).click();
   await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
 });

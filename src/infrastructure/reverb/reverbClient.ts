@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerStateSchema } from "../../domain/marketplaceListing";
 import { ReverbProviderError, type ReverbEnvironment, type ReverbGateway, type ReverbPayload } from "../../application/reverbGateway";
 
 export const reverbHosts = { sandbox: "https://sandbox.reverb.com", live: "https://api.reverb.com" } as const;
@@ -9,17 +10,17 @@ const id = z.union([z.string().min(1).max(200), z.number().int().nonnegative()])
 const label = z.string().min(1).max(500);
 const shopSchema = z.object({ id, name: label, shipping_profiles: z.array(z.object({ id, name: label })).default([]) });
 const linksSchema = z.object({ next: z.object({ href: z.string() }).nullable().optional() }).optional();
-const remoteSchema = z.object({ id, sku: z.string().min(1), state: z.object({ slug: z.string().min(1) }),
+const remoteSchema = z.object({ id, sku: z.string().min(1).max(200), state: z.object({ slug: providerStateSchema.refine(s => s !== "missing") }),
   _links: z.object({ web: z.object({ href: z.string() }).optional() }).optional() });
 
 // Only this adapter performs Reverb HTTP. Tokens and provider response bodies
 // never become errors, logs, or return values. Redirects cannot forward tokens.
 export class ReverbClient implements ReverbGateway {
   constructor(readonly environment: ReverbEnvironment, private readonly request: typeof fetch = fetch) {}
-  private async call(token: string, path: string, body?: ReverbPayload): Promise<unknown> {
+  private async call(token: string, path: string, body?: ReverbPayload, method = body ? "POST" : "GET"): Promise<unknown> {
     try {
       const response = await this.request(new URL(path, reverbHosts[this.environment]), {
-        method: body ? "POST" : "GET", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
+        method, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
         headers: { Authorization: `Bearer ${token}`, "Accept-Version": "3.0", Accept: "application/hal+json",
           "Content-Type": "application/hal+json", "User-Agent": "MarketplacePostingApp/1.0 (draft integration)" },
         ...(body ? { body: JSON.stringify({ ...body, publish: false }) } : {}),
@@ -30,6 +31,8 @@ export class ReverbClient implements ReverbGateway {
         throw new ReverbProviderError(status === 401 ? "auth" : status === 403 ? "forbidden" : status === 404 ? "missing"
           : status === 409 ? "conflict" : status === 429 ? "rate" : status >= 500 ? "unavailable" : "validation");
       }
+      // DELETE may return an empty body. Absence is verified by a separate SKU lookup.
+      if (method === "DELETE") { await response.body?.cancel(); return undefined; }
       // Bounded reads also cover chunked/malicious responses; timeout remains active.
       const reader = response.body?.getReader();
       if (!reader) throw new ReverbProviderError("malformed");
@@ -96,6 +99,10 @@ export class ReverbClient implements ReverbGateway {
     // Create returns a listing envelope; accept a direct resource as well.
     const envelope = z.object({ listing: z.unknown() }).safeParse(result);
     return this.remote(envelope.success ? envelope.data.listing : result);
+  }
+  async deleteDraft(token: string, remoteId: string) {
+    const safeId = this.parse(z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/), remoteId);
+    await this.call(token, `/api/listings/${encodeURIComponent(safeId)}`, undefined, "DELETE");
   }
 }
 export const reverbGateway = () => new ReverbClient(reverbEnvironment());

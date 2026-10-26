@@ -21,6 +21,7 @@ export function listingToRows(value: Listing) {
     priceOverrideCurrency: publication.priceOverride?.currency ?? null,
     publishedAt: publication.publishedAt ?? null, lastSyncedAt: publication.lastSyncedAt ?? null,
     providerEnvironment: publication.providerEnvironment ?? null, providerShopId: publication.providerShopId ?? null,
+    providerState: publication.providerState ?? null, providerCheckedAt: publication.providerCheckedAt ?? null,
   }));
   return { row, images, publications };
 }
@@ -42,6 +43,8 @@ export function listingFromRows(
       ...publication, externalListingId: publication.externalListingId ?? undefined,
       externalUrl: publication.externalUrl ?? undefined,
       providerEnvironment: publication.providerEnvironment ?? undefined, providerShopId: publication.providerShopId ?? undefined,
+      providerState: publication.providerState ?? undefined,
+      providerCheckedAt: publication.providerCheckedAt ? date(publication.providerCheckedAt) : undefined,
       priceOverride: money(publication.priceOverrideAmount, publication.priceOverrideCurrency ?? "USD"),
       publishedAt: publication.publishedAt ? date(publication.publishedAt) : undefined,
       lastSyncedAt: publication.lastSyncedAt ? date(publication.lastSyncedAt) : undefined,

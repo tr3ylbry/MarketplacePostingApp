@@ -16,6 +16,7 @@ export interface ReverbGateway {
   conditions(token: string): Promise<ReverbOption[]>;
   findBySku(token: string, sku: string): Promise<ReverbRemoteListing[]>;
   createDraft(token: string, payload: ReverbPayload): Promise<ReverbRemoteListing>;
+  deleteDraft(token: string, id: string): Promise<void>;
 }
 export type ReverbErrorCode = "auth" | "forbidden" | "validation" | "missing" | "conflict" | "rate" | "unavailable" | "malformed";
 const messages: Record<ReverbErrorCode, string> = {

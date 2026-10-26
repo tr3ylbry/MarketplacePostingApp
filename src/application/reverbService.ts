@@ -3,7 +3,7 @@ import type { ListingRepository } from "./listingRepository";
 import { ListingUnavailableError } from "./listingRepository";
 import { ownerIdSchema } from "./owner";
 import { ReverbDraftError, ReverbProviderError, type ReverbEnvironment, type ReverbGateway, type ReverbRemoteListing } from "./reverbGateway";
-import type { DraftClaim, EncryptedCredential, ReverbConnection, ReverbRepository } from "./reverbRepository";
+import type { DraftClaim, EncryptedCredential, ManagementClaim, ReverbConnection, ReverbRepository } from "./reverbRepository";
 import { reverbDraftPayload, reverbSku } from "./reverbDraft";
 import type { ProviderImageAccess } from "./imageStorage";
 
@@ -35,7 +35,50 @@ export function createReverbService(repo: ReverbRepository, listings: ListingRep
     ownerIdSchema.parse(owner); z.string().min(1).max(200).parse(id);
     const listing = await listings.getById(owner, id); if (!listing) throw new ListingUnavailableError(); return listing;
   }
+  async function localState(owner: string, id: string) {
+    const listing = await owned(owner, id); const c = await repo.connection(owner, environment);
+    const publication = listing.marketplaceListings.find(p => p.marketplace === "reverb" && p.providerEnvironment === environment && p.providerShopId === c?.shopId);
+    return { environment, connected: !!c && !c.needsReconnect, shopName: c?.shopName, publication };
+  }
+  function match(claim: ManagementClaim, sku: string, matches: ReverbRemoteListing[]) {
+    if (matches.length > 1) throw new ReverbDraftError("Multiple Reverb listings match this SKU. Resolve duplicates manually on Reverb.");
+    const remote = matches[0] ?? null;
+    if (remote && (remote.sku !== sku || (claim.externalId && remote.id !== claim.externalId))) throw new ReverbDraftError("Reverb identity conflict. Resolve it manually; no identity was replaced.");
+    if (!remote && !claim.externalId && claim.postAttempted) throw new ReverbDraftError("A previous draft request may have reached Reverb, but no matching listing is currently visible. Check again later before creating another draft.");
+    return remote;
+  }
+  async function manage(owner: string, id: string, remove: boolean) {
+    await owned(owner, id);
+    const claim = await repo.claimManagement(owner, environment, id);
+    try {
+      const c = await connected(owner);
+      if (c.version !== claim.connectionVersion) throw new ReverbDraftError("Connection changed. Check again.");
+      const sku = reverbSku(id);
+      let remote = match(claim, sku, await provider(c, token => gateway.findBySku(token, sku)));
+      let message = remote ? "Reverb status checked." : "No matching Reverb listing is currently present.";
+      if (remove && remote) {
+        if (!claim.externalId) throw new ReverbDraftError("Refresh and confirm the remote identity before deleting a draft.");
+        if (remote.state === "draft") {
+          await repo.verifyManagement(claim); // Short DB check ends before the HTTP DELETE.
+          try { await provider(c, token => gateway.deleteDraft(token, remote.id)); }
+          catch (error) {
+            if (!(error instanceof ReverbProviderError) || !["missing", "unavailable", "malformed"].includes(error.code)) throw error;
+            // An uncertain DELETE is never retried: a fresh lookup decides the outcome.
+          }
+          remote = match(claim, sku, await provider(c, token => gateway.findBySku(token, sku)));
+          message = remote ? "Deletion was not confirmed. The current Reverb state is shown; no second DELETE was sent."
+            : "Reverb draft is missing. Your local listing and photos remain. You can deliberately prepare a replacement.";
+        }
+      }
+      if (remote && remote.state !== "draft") message = "This Reverb listing is no longer a draft. Manage it on Reverb.";
+      await repo.reconcile(claim, remote);
+      return { ...await localState(owner, id), message };
+    } finally { await repo.releaseManagement(claim).catch(() => { /* Expiring lease; no provider details in logs. */ }); }
+  }
   return {
+    localState,
+    refresh(owner: string, id: string) { return manage(owner, id, false); },
+    deleteDraft(owner: string, id: string) { return manage(owner, id, true); },
     async status(owner: string) {
       ownerIdSchema.parse(owner); const c = await repo.connection(owner, environment);
       return { environment, connected: !!c, shopName: c?.shopName, connectedAt: c?.connectedAt, needsReconnect: c?.needsReconnect ?? false };

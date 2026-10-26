@@ -40,6 +40,8 @@ it("preserves pre-auth aggregates under a non-login holder until an explicit, id
     expect(migratedImages).toEqual([{ id: "legacy-image", listing_id: "legacy-item", storage_provider: "filename", pathname: null, original_filename: "old.jpg", content_type: null, byte_size: null, uploaded_at: null, sort_order: 0, alt_text: null }]);
     await migration("0003_flawless_lyja.sql");
     await migration("0004_provider_image_retention.sql");
+    await migration("0005_reverb_draft_management.sql");
+    expect((await client.query("SELECT provider_state, provider_checked_at FROM marketplace_listings")).rows).toEqual([{ provider_state: null, provider_checked_at: null }]);
     expect((await client.query("SELECT provider_retain_until FROM listing_images")).rows).toEqual([{ provider_retain_until: null }]);
     const db = drizzle(client, { schema });
     const repository = new DrizzleListingRepository(db);
@@ -62,7 +64,7 @@ it("preserves pre-auth aggregates under a non-login holder until an explicit, id
     expect(await repository.getById(other, owned.id)).toEqual(owned);
     expect(await repository.getById(other, "legacy-item")).toBeNull();
     expect((await client.query("SELECT * FROM listing_images")).rows).toEqual(migratedImages.map(image => ({ ...image, provider_retain_until: null })));
-    expect((await client.query("SELECT * FROM marketplace_listings")).rows).toEqual(publications.map(p => ({ ...p, provider_environment: null, provider_shop_id: null })));
+    expect((await client.query("SELECT * FROM marketplace_listings")).rows).toEqual(publications.map(p => ({ ...p, provider_environment: null, provider_shop_id: null, provider_state: null, provider_checked_at: null })));
   } finally {
     await client.query("RESET search_path");
     await client.query(`DROP SCHEMA IF EXISTS "${isolated}" CASCADE`);

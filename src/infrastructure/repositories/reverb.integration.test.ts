@@ -32,6 +32,7 @@ const gateway = {
   conditions: vi.fn(async () => { assertOutside(); return [{ id: conditionId, name: "Good" }]; }),
   findBySku: vi.fn(async () => { assertOutside(); return remotes; }),
   createDraft: vi.fn(async (_token: string, payload: ReverbPayload) => { assertOutside(); const remote = { id: "remote-1", sku: payload.sku, state: "draft" }; remotes = [remote]; return remote; }),
+  deleteDraft: vi.fn(async (_token: string, id: string) => { assertOutside(); remotes = remotes.filter(r => r.id !== id); }),
 } satisfies ReverbGateway;
 const images = { createProviderReadAccess: vi.fn(async () => { assertOutside(); return "https://private.example/image?signature=temporary"; }) };
 const service = createReverbService(repo, listings, gateway, cipher, images, "sandbox");
@@ -224,4 +225,129 @@ it("safe errors omit credentials, signatures and SQL", () => {
 });
 it("SKU is stable across edits and bounded ASCII", async () => {
   const before = reverbSku(listingId); expect(before).toMatch(/^crosslist-[a-f0-9]{32}$/); expect(reverbSku(listingId)).toBe(before); expect(reverbSku("other")).not.toBe(before);
+});
+
+const remoteDraft = (id = "remote-1", state = "draft") => ({ id, state, sku: reverbSku(listingId) });
+const publication = async () => (await listings.getById(a, listingId))!.marketplaceListings[0];
+const create = async () => service.createDraft(a, (await review()).reviewId);
+it("reads local management state without provider traffic; options require an explicit action", async () => {
+  vi.clearAllMocks();
+  expect((await service.localState(a, listingId)).connected).toBe(true);
+  for (const call of Object.values(gateway)) expect(call).not.toHaveBeenCalled();
+  await service.options(a, listingId);
+  expect(gateway.shop).toHaveBeenCalledOnce(); expect(gateway.categories).toHaveBeenCalledOnce(); expect(gateway.conditions).toHaveBeenCalledOnce();
+  expect(gateway.findBySku).not.toHaveBeenCalled();
+});
+it("persists an exact draft refresh and a real check timestamp without provider writes", async () => {
+  await create(); vi.clearAllMocks();
+  await service.refresh(a, listingId);
+  expect(await publication()).toMatchObject({ externalListingId: "remote-1", providerState: "draft", status: "draft" });
+  expect(Date.parse((await publication()).providerCheckedAt!)).toBeLessThanOrEqual(Date.now());
+  expect(gateway.findBySku).toHaveBeenCalledOnce(); expect(gateway.createDraft).not.toHaveBeenCalled(); expect(gateway.deleteDraft).not.toHaveBeenCalled();
+});
+it("adopts a sole remote draft after loss of local publication state, without a POST", async () => {
+  remotes = [remoteDraft("recovered")]; await service.refresh(a, listingId);
+  expect(await publication()).toMatchObject({ externalListingId: "recovered", providerState: "draft" });
+  await create(); expect(gateway.createDraft).not.toHaveBeenCalled();
+});
+it("known missing clears active identity and permits one deliberate replacement", async () => {
+  await create(); remotes = []; await service.refresh(a, listingId);
+  expect(await publication()).toMatchObject({ providerState: "missing" }); expect((await publication()).externalListingId).toBeUndefined();
+  const [request] = await db.select().from(schema.reverbDraftRequests).where(eq(schema.reverbDraftRequests.listingId, listingId));
+  expect(request.postAttempted).toBe(false); expect(request.externalId).toBeNull();
+  gateway.createDraft.mockImplementationOnce(async () => { assertOutside(); remotes = [remoteDraft("replacement")]; return remotes[0]; });
+  await create(); await service.refresh(a, listingId);
+  expect((await publication()).externalListingId).toBe("replacement"); expect(gateway.createDraft).toHaveBeenCalledTimes(2); expect(remotes).toHaveLength(1);
+});
+it("refresh never clears the fence for an unconfirmed ambiguous POST", async () => {
+  gateway.createDraft.mockRejectedValueOnce(new ReverbProviderError("unavailable"));
+  await expect(create()).rejects.toThrow("may have been created");
+  await expect(service.refresh(a, listingId)).rejects.toThrow("may have reached Reverb");
+  await expect(create()).rejects.toThrow("No new POST"); expect(gateway.createDraft).toHaveBeenCalledOnce();
+  const [request] = await db.select().from(schema.reverbDraftRequests).where(eq(schema.reverbDraftRequests.listingId, listingId));
+  expect(request.postAttempted).toBe(true); expect(request.externalId).toBeNull();
+});
+it("does not use a historical deletion to clear an ambiguous replacement POST fence", async () => {
+  await create(); await service.deleteDraft(a, listingId);
+  gateway.createDraft.mockRejectedValueOnce(new ReverbProviderError("unavailable"));
+  await expect(create()).rejects.toThrow("may have been created");
+  await expect(service.refresh(a, listingId)).rejects.toThrow("may have reached Reverb");
+  await expect(create()).rejects.toThrow("No new POST");
+  expect(gateway.createDraft).toHaveBeenCalledTimes(2);
+});
+it("retains a fresh non-draft identity without asserting published or sending DELETE", async () => {
+  await create(); remotes[0].state = "ended";
+  const result = await service.deleteDraft(a, listingId);
+  expect(result.message).toContain("no longer a draft");
+  expect(await publication()).toMatchObject({ externalListingId: "remote-1", providerState: "ended", status: "draft" });
+  expect((await publication()).publishedAt).toBeUndefined(); expect(gateway.deleteDraft).not.toHaveBeenCalled();
+});
+it.each(["duplicate", "mismatch"])("refuses %s identities without changing local state", async mode => {
+  await create(); const before = await publication();
+  remotes = mode === "duplicate" ? [remoteDraft(), remoteDraft("other")] : [remoteDraft("other")];
+  await expect(service.refresh(a, listingId)).rejects.toThrow(mode === "duplicate" ? "Multiple" : "identity conflict");
+  await expect(service.deleteDraft(a, listingId)).rejects.toThrow();
+  expect(await publication()).toEqual(before); expect(gateway.deleteDraft).not.toHaveBeenCalled();
+});
+it("deletes only after a fresh lookup, confirms absence, and preserves all local product data", async () => {
+  await create(); const before = (await listings.getById(a, listingId))!; const connection = await repo.connection(a, "sandbox");
+  vi.clearAllMocks(); await service.deleteDraft(a, listingId);
+  expect(gateway.findBySku).toHaveBeenCalledTimes(2); expect(gateway.deleteDraft).toHaveBeenCalledOnce();
+  expect(gateway.findBySku.mock.invocationCallOrder[0]).toBeLessThan(gateway.deleteDraft.mock.invocationCallOrder[0]);
+  expect(gateway.deleteDraft.mock.invocationCallOrder[0]).toBeLessThan(gateway.findBySku.mock.invocationCallOrder[1]);
+  const after = (await listings.getById(a, listingId))!;
+  expect(after.images).toEqual(before.images); expect(after.title).toBe(before.title); expect(await repo.connection(a, "sandbox")).toEqual(connection);
+  expect(await publication()).toMatchObject({ providerState: "missing" }); expect(remotes).toEqual([]);
+});
+it.each(["missing", "unavailable", "malformed"] as const)("reconciles %s DELETE outcome without retrying", async code => {
+  await create(); gateway.deleteDraft.mockImplementationOnce(async () => { assertOutside(); remotes = []; throw new ReverbProviderError(code); });
+  await service.deleteDraft(a, listingId); expect((await publication()).providerState).toBe("missing"); expect(gateway.deleteDraft).toHaveBeenCalledOnce();
+});
+it("keeps linkage when an uncertain DELETE still finds the exact draft", async () => {
+  await create(); gateway.deleteDraft.mockRejectedValueOnce(new ReverbProviderError("unavailable"));
+  const result = await service.deleteDraft(a, listingId);
+  expect(result.message).toContain("not confirmed"); expect((await publication()).externalListingId).toBe("remote-1");
+  expect((await publication()).providerState).toBe("draft"); expect(gateway.deleteDraft).toHaveBeenCalledOnce();
+});
+it("records a non-draft state after uncertain deletion without a second DELETE", async () => {
+  await create(); gateway.deleteDraft.mockImplementationOnce(async () => { remotes[0].state = "live"; throw new ReverbProviderError("unavailable"); });
+  await service.deleteDraft(a, listingId); expect((await publication()).providerState).toBe("live"); expect(gateway.deleteDraft).toHaveBeenCalledOnce();
+});
+it("does not overwrite linkage when post-delete lookup reports a conflict", async () => {
+  await create(); const before = await publication();
+  gateway.deleteDraft.mockImplementationOnce(async () => { remotes = [remoteDraft(), remoteDraft("other")]; });
+  await expect(service.deleteDraft(a, listingId)).rejects.toThrow("Multiple"); expect(await publication()).toEqual(before);
+});
+it.each(["auth", "forbidden", "rate"] as const)("does not retry DELETE after %s rejection", async code => {
+  await create(); gateway.deleteDraft.mockRejectedValueOnce(new ReverbProviderError(code)); vi.clearAllMocks();
+  await expect(service.deleteDraft(a, listingId)).rejects.toBeInstanceOf(ReverbProviderError);
+  expect(gateway.deleteDraft).toHaveBeenCalledOnce(); expect(gateway.findBySku).toHaveBeenCalledOnce();
+});
+it("denies foreign state reads, refresh, adoption, delete and fence reset before provider I/O", async () => {
+  await create(); vi.clearAllMocks(); const before = await publication();
+  for (const operation of [service.localState, service.refresh, service.deleteDraft]) await expect(operation(b, listingId)).rejects.toThrow("Listing not found");
+  for (const call of Object.values(gateway)) expect(call).not.toHaveBeenCalled(); expect(await publication()).toEqual(before);
+});
+it("rejects stale reconciliation after a newer management lease commits another identity", async () => {
+  const old = await repo.claimManagement(a, "sandbox", listingId);
+  await db.update(schema.reverbManagementLeases).set({ expiresAt: new Date(Date.now() - 1).toISOString() }).where(eq(schema.reverbManagementLeases.listingId, listingId));
+  const fresh = await repo.claimManagement(a, "sandbox", listingId);
+  await repo.reconcile(fresh, remoteDraft("newer")); await repo.releaseManagement(fresh);
+  await expect(repo.reconcile(old, remoteDraft("stale"))).rejects.toThrow("stale");
+  expect((await publication()).externalListingId).toBe("newer");
+});
+it("serializes management with creation and fences expired create workers", async () => {
+  const prepared = await review(); const createClaim = await repo.claim(a, "sandbox", prepared.reviewId);
+  await expect(service.refresh(a, listingId)).rejects.toThrow("in progress");
+  await db.update(schema.reverbDraftRequests).set({ leaseUntil: new Date(Date.now() - 1).toISOString() }).where(eq(schema.reverbDraftRequests.listingId, listingId));
+  const management = await repo.claimManagement(a, "sandbox", listingId);
+  await expect(repo.finish(createClaim, remoteDraft())).rejects.toThrow("stale");
+  await expect(review()).rejects.toThrow("in progress"); await expect(repo.claim(a, "sandbox", prepared.reviewId)).rejects.toThrow("in progress");
+  await repo.releaseManagement(management);
+});
+it("rejects stale management before DELETE after a concurrent local edit", async () => {
+  await create(); gateway.findBySku.mockImplementationOnce(async () => {
+    assertOutside(); await db.update(schema.listings).set({ updatedAt: new Date(Date.now() + 1000).toISOString() }).where(eq(schema.listings.id, listingId)); return remotes;
+  });
+  await expect(service.deleteDraft(a, listingId)).rejects.toThrow("stale"); expect(gateway.deleteDraft).not.toHaveBeenCalled();
 });

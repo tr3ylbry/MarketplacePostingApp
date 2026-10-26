@@ -6,7 +6,7 @@ import { createReverbDraft, prepareReverb } from "../../app/settings/integration
 type Service = ReturnType<typeof createReverbService>;
 type Options = Awaited<ReturnType<Service["options"]>>;
 type Review = Awaited<ReturnType<Service["prepare"]>>;
-export function ReverbDraftForm({ listingId, options }: { listingId: string; options: Options }) {
+export function ReverbDraftForm({ listingId, options, onCreated }: { listingId: string; options: Options; onCreated?: () => void }) {
   const [review, setReview] = useState<Review | null>(null), [message, setMessage] = useState("");
   const [result, setResult] = useState<Awaited<ReturnType<Service["createDraft"]>> | null>(null);
   const [busy, start] = useTransition();
@@ -35,7 +35,7 @@ export function ReverbDraftForm({ listingId, options }: { listingId: string; opt
         Photos: review.photoCount, SKU: review.payload.sku }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       <p>Only a draft will be created. Review expires in 10 minutes. Changes to the listing or connection require a fresh review.</p>
       <button type="button" disabled={busy || !!result} onClick={() => start(async () => { try { const response = await createReverbDraft(review.reviewId);
-        if (response.ok) { setResult(response.data); setMessage("Reverb draft saved locally. No live listing was published."); } else setMessage(response.error);
+        if (response.ok) { setResult(response.data); setMessage("Reverb draft saved locally. No live listing was published."); onCreated?.(); } else setMessage(response.error);
       } catch { setMessage("Outcome uncertain. Prepare again to reconcile by SKU; do not manually create a duplicate."); } })}>Create Reverb Draft</button>
     </section> : null}
     <p role="status">{message}</p>
