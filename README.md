@@ -4,6 +4,8 @@ Draft an item once, preview marketplace-specific fields, and explicitly create a
 
 **No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; other marketplaces remain manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
 
+**Start with the [system architecture guide](docs/architecture.md)** for the system map, database model, security boundaries and integration lifecycle. This README covers development and operations; the [Reverb guide](docs/reverb-drafts.md) covers provider-specific behavior. Stage 7 documents the implemented foundation without adding runtime features.
+
 ## Architecture
 
 ```text
@@ -65,13 +67,15 @@ Each mapper exposes `validate(listing)` and `createDraft(listing)`. Incomplete l
 
 Category suggestions in manual previews remain scaffolding. The separate Reverb integration retrieves authoritative taxonomy and conditions; no network code was added to the pure mappers. There is no background synchronization or live publishing.
 
-### Reverb draft publishing (PR #5)
+### Reverb draft creation and management
 
-Connect your own Personal Access Token at `/settings/integrations/reverb`, then choose **Prepare Reverb Draft** on a saved listing. Select real category/condition UUIDs and shipping, review the exact meaningful fields, and explicitly confirm **Create Reverb Draft**. Both server layers force `publish=false`. The default environment is Sandbox; Live mode is prominently labeled and is not permission to test against a live account.
+Connect your own Personal Access Token at `/settings/integrations/reverb`, then open a saved listing's Reverb page and explicitly **Load Reverb Options**. Select real category/condition identifiers and shipping, review the exact meaningful fields, and explicitly confirm **Create Reverb Draft**. Both server layers force `publish=false`. The default environment is Sandbox; Live mode is prominently labeled and is not permission to test against a live account.
+
+Page rendering reads only local state. **Refresh Reverb Status** explicitly checks the remote SKU; **Delete Reverb Draft** revalidates identity and draft state before deleting remotely and confirming absence. Local listings/photos remain. A confirmed missing draft can be deliberately recreated, while an unconfirmed ambiguous POST remains blocked from unsafe retries. Non-drafts, duplicate SKU matches and identity conflicts require management on Reverb. Migration `0005_reverb_draft_management.sql` adds nullable provider state/check time and short management leases; there is no polling or remote content update.
 
 Tokens require `public`, `read_listings`, `write_listings`, and `read_profile` (shop identity/profiles). PostgreSQL stores only AES-256-GCM encrypted credentials under a dedicated server key. Owner-scoped short transactions coordinate reviews/attempts and publication identity; all Reverb network calls and private photo signing run outside transactions. Stable SKU lookup with `state=all` reconciles retries before any POST. Temporary private photo URLs expire after 15 minutes and are never persisted or returned in reviews. Before signing, an owner-scoped boundary durably retains each source Blob through that expiry plus a one-minute margin. Image/listing removal stays immediate in the app, but physical deletion waits in the cleanup ledger so concurrent deletion cannot interrupt Reverb ingestion. Apply migration `0004_provider_image_retention.sql` and use the existing operator cleanup command for deferred objects. Existing 60-second browser reads are unchanged and do not extend retention.
 
-See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). The new migration adds encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it does not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft creation, private photo ingestion, explicit shipping rates, duplicate reconciliation and remote draft deletion passed on 2026-10-24; CI continues to use isolated fakes.
+See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). Migration `0003_flawless_lyja.sql` introduced encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it did not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft creation, private photo ingestion, explicit shipping rates, duplicate reconciliation and remote draft deletion passed on 2026-10-24. PR #6 additionally verified passive-page zero traffic, refresh, app-driven deletion, recreation and external-deletion detection on 2026-10-25; disposable data was cleaned up after image retention expired. CI continues to use isolated fakes.
 
 ## Routes and images
 
@@ -205,7 +209,7 @@ npm run check            # All of the above, including production build and E2E
 
 GitHub Actions uses an ephemeral PostgreSQL service for pull requests and pushes to `main`/`tbryant/dev`. It runs install, lint, typecheck, unit tests, integration tests, production build and Chromium E2E. Failure traces are retained briefly. No personal database or deployment credentials are used.
 
-Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb lifecycle tests and five Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312 with real application/server/database boundaries: connect, review, explicit draft, persistence and duplicate reconciliation, plus zero provider writes on ordinary saves. Production never resolves the test gateway. Exact final results are recorded in the PR.
+Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb lifecycle tests and five Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312 with real application/server/database boundaries: connect, explicitly load options, create, refresh, delete and recreate, plus zero Reverb traffic on passive navigation or ordinary saves. Production never resolves the test gateway. Exact final results are recorded in the PR.
 
 ## Intentionally deferred
 
