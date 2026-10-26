@@ -16,7 +16,10 @@ const identityConflict = () => new ReverbDraftError("Existing Reverb publication
 
 async function activePublication(tx: Transaction, listingId: string, env: ReverbEnvironment, shopId: string) {
   const rows = await tx.select().from(publications).where(and(eq(publications.listingId, listingId), eq(publications.marketplace, "reverb")));
-  const scoped = rows.filter(p => !p.providerEnvironment || p.providerEnvironment === env);
+  // Unlinked import history is not an active provider identity. Keep scoped
+  // missing records and incomplete linked identities subject to the checks below.
+  const scoped = rows.filter(p => (p.externalListingId || p.providerEnvironment || p.providerShopId)
+    && (!p.providerEnvironment || p.providerEnvironment === env));
   if (scoped.length > 1 || scoped.some(p => p.providerEnvironment !== env || p.providerShopId !== shopId)) throw identityConflict();
   return scoped[0];
 }

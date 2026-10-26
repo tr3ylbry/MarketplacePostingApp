@@ -230,6 +230,31 @@ it("SKU is stable across edits and bounded ASCII", async () => {
 const remoteDraft = (id = "remote-1", state = "draft") => ({ id, state, sku: reverbSku(listingId) });
 const publication = async () => (await listings.getById(a, listingId))!.marketplaceListings[0];
 const create = async () => service.createDraft(a, (await review()).reviewId);
+it.each(["create", "refresh"])("preserves unlinked legacy history while allowing %s", async operation => {
+  const legacyId = crypto.randomUUID();
+  await db.insert(schema.marketplaceListings).values({ id: legacyId, listingId, marketplace: "reverb", status: "published", publishedAt: "2020-01-01T00:00:00.000Z" });
+  const [legacy] = await db.select().from(schema.marketplaceListings).where(eq(schema.marketplaceListings.id, legacyId));
+  if (operation === "create") await create();
+  else { remotes = [remoteDraft("recovered")]; await service.refresh(a, listingId); }
+  const rows = await db.select().from(schema.marketplaceListings).where(eq(schema.marketplaceListings.listingId, listingId));
+  expect(rows).toHaveLength(2);
+  expect(rows.find(row => row.id === legacyId)).toEqual(legacy);
+  expect(rows.find(row => row.providerEnvironment === "sandbox")).toMatchObject({ providerShopId: "shop-a", providerState: "draft", externalListingId: operation === "create" ? "remote-1" : "recovered" });
+  // Subsequent operations must still select the active scoped record, not history.
+  await service.refresh(a, listingId);
+  await create();
+  expect(gateway.createDraft).toHaveBeenCalledTimes(operation === "create" ? 1 : 0);
+});
+it.each([
+  { externalListingId: "legacy-linked" },
+  { providerShopId: "unknown-shop" },
+])("still rejects incomplete active provider identity %j", async identity => {
+  await db.insert(schema.marketplaceListings).values({ id: crypto.randomUUID(), listingId, marketplace: "reverb", status: "draft", ...identity });
+  await expect(create()).rejects.toThrow("manual identity resolution");
+  vi.clearAllMocks();
+  await expect(service.refresh(a, listingId)).rejects.toThrow("manual identity resolution");
+  expect(gateway.findBySku).not.toHaveBeenCalled(); expect(gateway.createDraft).not.toHaveBeenCalled();
+});
 it("reads local management state without provider traffic; options require an explicit action", async () => {
   vi.clearAllMocks();
   expect((await service.localState(a, listingId)).connected).toBe(true);
