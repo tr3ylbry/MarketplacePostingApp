@@ -3,6 +3,10 @@ import { imageContentTypeSchema, MAX_IMAGE_BYTES, type BlobImageSource } from ".
 
 export const UPLOAD_TTL_MS = 5 * 60 * 1000;
 export const READ_TTL_MS = 60 * 1000;
+export const PROVIDER_READ_TTL_MS = 15 * 60 * 1000;
+export interface ProviderImageAccess { createProviderReadAccess(owner: string, listingId: string, imageId: string): Promise<string> }
+// Low-level signing uses an absolute expiry already covered by durable retention.
+export interface ProviderImageSigner { signProviderReadAccess(pathname: string, validUntil: number): Promise<string> }
 export const CLEANUP_GRACE_MS = 60 * 1000;
 export const uploadInputSchema = z.object({
   filename: z.string().trim().min(1).max(255),

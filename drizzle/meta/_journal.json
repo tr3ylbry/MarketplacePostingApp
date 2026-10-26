@@ -22,6 +22,20 @@
       "when": 1792618429082,
       "tag": "0002_glorious_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792792637220,
+      "tag": "0003_flawless_lyja",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792976240911,
+      "tag": "0004_provider_image_retention",
+      "breakpoints": true
     }
   ]
 }

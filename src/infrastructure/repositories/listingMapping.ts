@@ -20,6 +20,7 @@ export function listingToRows(value: Listing) {
     priceOverrideAmount: publication.priceOverride ? String(publication.priceOverride.amount) : null,
     priceOverrideCurrency: publication.priceOverride?.currency ?? null,
     publishedAt: publication.publishedAt ?? null, lastSyncedAt: publication.lastSyncedAt ?? null,
+    providerEnvironment: publication.providerEnvironment ?? null, providerShopId: publication.providerShopId ?? null,
   }));
   return { row, images, publications };
 }
@@ -40,6 +41,7 @@ export function listingFromRows(
     marketplaceListings: publications.map(publication => ({
       ...publication, externalListingId: publication.externalListingId ?? undefined,
       externalUrl: publication.externalUrl ?? undefined,
+      providerEnvironment: publication.providerEnvironment ?? undefined, providerShopId: publication.providerShopId ?? undefined,
       priceOverride: money(publication.priceOverrideAmount, publication.priceOverrideCurrency ?? "USD"),
       publishedAt: publication.publishedAt ? date(publication.publishedAt) : undefined,
       lastSyncedAt: publication.lastSyncedAt ? date(publication.lastSyncedAt) : undefined,

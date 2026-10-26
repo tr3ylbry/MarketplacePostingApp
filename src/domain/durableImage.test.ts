@@ -19,7 +19,7 @@ it("round trips both legacy and durable source columns with order and alt text",
   const stored = listingImageSchema.parse({ id, listingId: "listing", source, order: 2, altText: "Front" });
   for (const image of [legacy, stored]) {
     const row = imageToRow(image);
-    expect(imageFromRow({ ...row, pathname: row.pathname ?? null, contentType: row.contentType ?? null, byteSize: row.byteSize ?? null, uploadedAt: row.uploadedAt ?? null, altText: row.altText ?? null })).toEqual(image);
+    expect(imageFromRow({ ...row, pathname: row.pathname ?? null, contentType: row.contentType ?? null, byteSize: row.byteSize ?? null, uploadedAt: row.uploadedAt ?? null, providerRetainUntil: null, altText: row.altText ?? null })).toEqual(image);
   }
 });
 it("rejects extra browser authority fields and checks intentional file signatures", () => {

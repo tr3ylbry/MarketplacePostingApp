@@ -32,6 +32,17 @@ it("checks metadata and file signature and cancels the stream after a bounded pr
   expect(cancel).toHaveBeenCalled();
   await expect(storage.verifyUpload({ ...upload, size: 13 })).rejects.toThrow("does not match");
 });
+it("separately bounds private provider-ingestion capabilities to fifteen minutes", async () => {
+  const before = Date.now(); await storage.signProviderReadAccess(upload.pathname, before + 900000);
+  const options = vi.mocked(issueSignedToken).mock.calls[0][0];
+  expect(options.operations).toEqual(["get"]); expect(options.pathname).toBe(upload.pathname);
+  expect(options.validUntil).toBeGreaterThanOrEqual(before + 900000); expect(options.validUntil).toBeLessThanOrEqual(Date.now() + 900000);
+  expect(presignUrl).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ access: "private", operation: "get", useCache: false, validUntil: before + 900000 }));
+});
+it("rejects expired or excessive provider expiry without contacting Blob", async () => {
+  for (const expiry of [Date.now() - 1, Date.now() + 1800000, NaN]) await expect(storage.signProviderReadAccess(upload.pathname, expiry)).rejects.toThrow();
+  expect(issueSignedToken).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
+});
 it("deletes only the supplied trusted storage identifier using server authentication", async () => {
   await storage.deleteObject(upload.pathname); expect(del).toHaveBeenCalledWith(upload.pathname, expect.objectContaining({ abortSignal: expect.anything() }));
 });

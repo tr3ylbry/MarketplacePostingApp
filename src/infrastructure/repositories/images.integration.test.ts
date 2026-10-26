@@ -5,6 +5,8 @@ import { listingFixture } from "../../test/fixtures";
 import { MemoryImageStorage } from "../../test/storage/memoryImageStorage";
 import { createImageService } from "../../application/imageService";
 import { createListingService } from "../../application/listingService";
+import { createProviderImageAccess } from "../../application/providerImageAccess";
+import { CLEANUP_GRACE_MS, PROVIDER_READ_TTL_MS } from "../../application/imageStorage";
 import { imagesFromNames } from "../../domain/listingImage";
 import { DrizzleImageRepository } from "./drizzleImageRepository";
 import { DrizzleListingRepository } from "./drizzleListingRepository";
@@ -29,6 +31,7 @@ beforeEach(async () => {
   storage = new MemoryImageStorage(); service = createImageService(repository, storage);
 });
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   for (const upload of storage.uploads.values()) paths.add(upload.pathname);
   for (const owner of [a, b]) { await db.delete(schema.listings).where(eq(schema.listings.ownerId, owner)); await db.delete(schema.users).where(eq(schema.users.id, owner)); }
@@ -43,6 +46,101 @@ async function prepare(owner: string, listingId: string) {
 async function saved(owner: string, listingId: string) {
   const upload = await prepare(owner, listingId); await service.finalize(owner, listingId, upload.id); return upload;
 }
+
+it("retains bytes after image removal until provider expiry, then cleans the orphan", async () => {
+  const listing = await listings.create(a, listingFixture()), image = await saved(a, listing.id), kept = await saved(a, listing.id);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const start = Date.now();
+  const signer = { signProviderReadAccess: vi.fn(async (_path: string, expiry: number) => {
+    expect(expiry).toBe(start + PROVIDER_READ_TTL_MS);
+    // A deletion between the committed hold and remote signing is also safe.
+    await service.remove(a, listing.id, image.id);
+    expect(storage.objects.has(image.pathname)).toBe(true);
+    return "https://private.example/temporary";
+  }) };
+  await createProviderImageAccess(repository, signer).createProviderReadAccess(a, listing.id, image.id);
+  expect((await listings.getById(a, listing.id))?.images.map(i => [i.id, i.order])).toEqual([[kept.id, 0]]);
+  const [entry] = await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, image.pathname));
+  expect(Date.parse(entry.notBefore)).toBeGreaterThanOrEqual(start + PROVIDER_READ_TTL_MS + CLEANUP_GRACE_MS);
+  await cleanupImages(db, storage); expect(storage.objects.has(image.pathname)).toBe(true);
+  vi.setSystemTime(Date.parse(entry.notBefore) + 1);
+  await cleanupImages(db, storage);
+  expect(storage.objects.has(image.pathname)).toBe(false); expect(storage.objects.has(kept.pathname)).toBe(true);
+  expect(await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, image.pathname))).toEqual([]);
+});
+
+it("listing deletion preserves retained bytes and orphan holds across cascade, then retries cleanup safely", async () => {
+  const listing = await listings.create(a, listingFixture()), other = await listings.create(b, listingFixture());
+  const first = await saved(a, listing.id), second = await saved(a, listing.id), foreign = await saved(b, other.id);
+  const signer = { signProviderReadAccess: vi.fn(async () => "https://private.example/temporary") };
+  const access = createProviderImageAccess(repository, signer);
+  vi.useFakeTimers({ toFake: ["Date"] }); const start = Date.now();
+  await access.createProviderReadAccess(a, listing.id, first.id);
+  await access.createProviderReadAccess(a, listing.id, second.id);
+  await createListingService(listings, storage).deleteListing(a, listing.id);
+  expect(await listings.getById(a, listing.id)).toBeNull();
+  expect(await db.select().from(schema.listingImages).where(eq(schema.listingImages.listingId, listing.id))).toEqual([]);
+  for (const image of [first, second]) {
+    const [entry] = await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, image.pathname));
+    expect(Date.parse(entry.notBefore)).toBeGreaterThanOrEqual(start + PROVIDER_READ_TTL_MS + CLEANUP_GRACE_MS);
+  }
+  await cleanupImages(db, storage); expect(storage.deleted).toEqual([]);
+  expect(storage.objects.size).toBe(3);
+  vi.setSystemTime(start + PROVIDER_READ_TTL_MS + CLEANUP_GRACE_MS + 1);
+  storage.failDelete = true; expect((await cleanupImages(db, storage)).failed).toBe(2);
+  expect(storage.objects.size).toBe(3);
+  storage.failDelete = false; vi.setSystemTime(Date.now() + CLEANUP_GRACE_MS + 1);
+  expect((await cleanupImages(db, storage)).removed).toBe(2);
+  expect(storage.objects.has(first.pathname)).toBe(false); expect(storage.objects.has(second.pathname)).toBe(false);
+  expect(storage.objects.has(foreign.pathname)).toBe(true); expect(storage.deleted).not.toContain(foreign.pathname);
+});
+
+it("extends but never shortens provider retention, preserving it through edits and reordering", async () => {
+  const listing = await listings.create(a, listingFixture()), image = await saved(a, listing.id);
+  const signer = { signProviderReadAccess: vi.fn(async () => "https://private.example/temporary") };
+  const access = createProviderImageAccess(repository, signer);
+  const retained = async () => (await db.select().from(schema.listingImages).where(eq(schema.listingImages.id, image.id)))[0].providerRetainUntil;
+  expect(await retained()).toBeNull(); // Old/new images have no hold until provider access.
+  await service.read(a, listing.id, image.id); expect(await retained()).toBeNull();
+  vi.useFakeTimers({ toFake: ["Date"] }); const start = Date.now();
+  await access.createProviderReadAccess(a, listing.id, image.id); const first = await retained();
+  vi.setSystemTime(start + 60000);
+  await access.createProviderReadAccess(a, listing.id, image.id); const second = await retained();
+  expect(Date.parse(second!)).toBeGreaterThan(Date.parse(first!));
+  await repository.retainForProvider(a, listing.id, image.id, first!); expect(await retained()).toBe(second);
+  await service.reorder(a, listing.id, [image.id]); expect(await retained()).toBe(second);
+  const current = (await listings.getById(a, listing.id))!;
+  await createListingService(listings).updateListing(a, listing.id, current, current.updatedAt);
+  expect(await retained()).toBe(second);
+});
+
+it("fails closed for foreign, missing, removed and legacy provider images before signing", async () => {
+  const listing = listingFixture(); listing.images = imagesFromNames(listing.id, ["legacy.png"]);
+  await listings.create(a, listing); const image = await saved(a, listing.id);
+  const signer = { signProviderReadAccess: vi.fn(async () => "https://private.example/temporary") };
+  const access = createProviderImageAccess(repository, signer);
+  for (const [owner, parent, id] of [[b, listing.id, image.id], [a, "missing", image.id], [a, listing.id, listing.images[0].id], [a, listing.id, image.pathname]]) {
+    await expect(access.createProviderReadAccess(owner, parent, id)).rejects.toThrow();
+  }
+  await service.remove(a, listing.id, image.id);
+  await expect(access.createProviderReadAccess(a, listing.id, image.id)).rejects.toThrow();
+  expect(signer.signProviderReadAccess).not.toHaveBeenCalled();
+});
+
+it("commits retention before signing outside transactions and keeps it on signing failure", async () => {
+  const listing = await listings.create(a, listingFixture()), image = await saved(a, listing.id);
+  const transaction = db.transaction.bind(db); let active = 0;
+  vi.spyOn(db, "transaction").mockImplementation(async (...args) => { active++; try { return await transaction(...args); } finally { active--; } });
+  const signer = { signProviderReadAccess: vi.fn(async () => {
+    expect(active).toBe(0);
+    const [row] = await db.select().from(schema.listingImages).where(eq(schema.listingImages.id, image.id));
+    expect(Date.parse(row.providerRetainUntil!)).toBeGreaterThan(Date.now());
+    throw new Error("Provider signing failed");
+  }) };
+  await expect(createProviderImageAccess(repository, signer).createProviderReadAccess(a, listing.id, image.id)).rejects.toThrow("Provider signing failed");
+  await service.remove(a, listing.id, image.id);
+  expect(storage.objects.has(image.pathname)).toBe(true); expect(storage.deleted).toEqual([]);
+});
 
 it("persists verified metadata, retries finalization without duplicates and updates concurrency", async () => {
   const listing = await listings.create(a, listingFixture()), upload = await saved(a, listing.id);
