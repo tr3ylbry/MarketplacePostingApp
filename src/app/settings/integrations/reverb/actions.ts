@@ -12,3 +12,6 @@ export async function connectReverb(token: unknown) { return perform(owner => re
 export async function disconnectReverb() { return perform(owner => reverbService().disconnect(owner)); }
 export async function prepareReverb(id: string, selection: unknown) { return perform(owner => reverbService().prepare(owner, id, selection)); }
 export async function createReverbDraft(reviewId: string) { return perform(owner => reverbService().createDraft(owner, reviewId)); }
+export async function loadReverbOptions(id: string) { return perform(owner => reverbService().options(owner, id)); }
+export async function refreshReverbStatus(id: string) { return perform(owner => reverbService().refresh(owner, id)); }
+export async function deleteReverbDraft(id: string) { return perform(owner => reverbService().deleteDraft(owner, id)); }

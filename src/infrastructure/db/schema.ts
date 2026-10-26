@@ -62,8 +62,10 @@ export const marketplaceListings = pgTable("marketplace_listings", {
   priceOverrideAmount: numeric("price_override_amount"), priceOverrideCurrency: text("price_override_currency"),
   publishedAt: instant("published_at"), lastSyncedAt: instant("last_synced_at"),
   providerEnvironment: text("provider_environment"), providerShopId: text("provider_shop_id"),
+  providerState: text("provider_state"), providerCheckedAt: instant("provider_checked_at"),
 }, table => [
   index("publications_listing_idx").on(table.listingId),
+  check("publication_provider_state_valid", sql`${table.providerState} IS NULL OR ${table.providerState} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
   check("publication_price_valid", sql`(${table.priceOverrideAmount} IS NULL AND ${table.priceOverrideCurrency} IS NULL) OR (${table.priceOverrideAmount} IS NOT NULL AND ${table.priceOverrideCurrency} IS NOT NULL AND ${table.priceOverrideAmount} >= 0 AND ${table.priceOverrideAmount} < 'Infinity'::numeric AND ${table.priceOverrideCurrency} = 'USD')`),
 ]);
 
@@ -88,3 +90,11 @@ export const reverbDraftRequests = pgTable("reverb_draft_requests", {
   expiresAt: instant("expires_at").notNull(), leaseUntil: instant("lease_until"), attemptId: text("attempt_id"),
   postAttempted: boolean("post_attempted").notNull().default(false), externalId: text("external_id"),
 }, t => [primaryKey({ columns: [t.listingId, t.environment] }), index("reverb_requests_owner_idx").on(t.ownerId)]);
+
+// Short-lived fencing tokens for explicit refresh/delete operations, not jobs.
+// Parent-row locking coordinates these leases with the existing create lease.
+export const reverbManagementLeases = pgTable("reverb_management_leases", {
+  listingId: text("listing_id").notNull().references(() => listings.id, { onDelete: "cascade" }),
+  environment: reverbEnvironment("environment").notNull(),
+  token: text("token").notNull(), expiresAt: instant("expires_at").notNull(),
+}, t => [primaryKey({ columns: [t.listingId, t.environment] })]);

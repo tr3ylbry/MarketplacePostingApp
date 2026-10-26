@@ -54,4 +54,34 @@ describe("Reverb HTTP boundary", () => {
     vi.stubEnv("REVERB_ENVIRONMENT", undefined); expect(reverbEnvironment()).toBe("sandbox");
     vi.stubEnv("REVERB_ENVIRONMENT", "https://evil.test"); expect(() => reverbEnvironment()).toThrow(); vi.unstubAllEnvs();
   });
+  it.each(["sandbox", "live"] as const)("deletes only a derived resource on the pinned %s host", async env => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    await new ReverbClient(env, request).deleteDraft(token, "123-test");
+    const [url, init] = request.mock.calls[0];
+    expect(String(url)).toBe(`${env === "sandbox" ? "https://sandbox.reverb.com" : "https://api.reverb.com"}/api/listings/123-test`);
+    expect(init).toMatchObject({ method: "DELETE", redirect: "error", cache: "no-store" });
+    expect(init?.headers).toMatchObject({ Authorization: `Bearer ${token}`, "Accept-Version": "3.0", Accept: "application/hal+json", "Content-Type": "application/hal+json" });
+    expect(init?.signal).toBeDefined(); expect(init?.body).toBeUndefined();
+  });
+  it.each([[401,"auth"],[403,"forbidden"],[404,"missing"],[429,"rate"],[500,"unavailable"]])("maps DELETE HTTP %i without leaking provider data", async (status, code) => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ secret: token }, Number(status)));
+    const error = await new ReverbClient("sandbox", request).deleteDraft(token, "123").catch(e => e);
+    expect(error.code).toBe(code); expect(error.message).not.toContain(token);
+  });
+  it("maps DELETE timeout safely and rejects arbitrary resource paths before network I/O", async () => {
+    const request = vi.fn<typeof fetch>().mockRejectedValue(new DOMException(token, "TimeoutError"));
+    const client = new ReverbClient("sandbox", request);
+    await expect(client.deleteDraft(token, "123")).rejects.toMatchObject({ code: "unavailable" });
+    request.mockClear();
+    for (const id of ["../shop", "https://evil.test", "123?token=secret", ""]) await expect(client.deleteDraft(token, id)).rejects.toMatchObject({ code: "malformed" });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it.each(["", "x".repeat(65), "<script>", "missing"])("rejects invalid or application-only provider state %s", async state => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ listings: [{ ...remote, state: { slug: state } }] }));
+    await expect(new ReverbClient("sandbox", request).findBySku(token, remote.sku)).rejects.toMatchObject({ code: "malformed" });
+  });
+  it.each(["https://user:password@sandbox.reverb.com/item/123", "https://sandbox.reverb.com/item/123#secret", "https://sandbox.reverb.com/item/123?token=secret", "https://reverb.com/item/123", "/api/listings/123"])("omits an unsafe or wrong-environment web link", async href => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ listings: [{ ...remote, _links: { web: { href } } }] }));
+    expect((await new ReverbClient("sandbox", request).findBySku(token, remote.sku))[0].url).toBeUndefined();
+  });
 });

@@ -8,6 +8,7 @@ export type Marketplace = z.infer<typeof marketplaceSchema>;
 export const publicationStatusSchema = z.enum([
   "draft", "ready", "published", "sold", "error", "needs-renewal",
 ]);
+export const providerStateSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 export const marketplaceListingSchema = z.object({
   id: z.string().min(1),
   listingId: z.string().min(1),
@@ -20,6 +21,8 @@ export const marketplaceListingSchema = z.object({
   lastSyncedAt: z.iso.datetime().optional(),
   providerEnvironment: z.enum(["sandbox", "live"]).optional(),
   providerShopId: z.string().min(1).optional(),
+  providerState: providerStateSchema.optional(),
+  providerCheckedAt: z.iso.datetime().optional(),
 });
 export type MarketplaceListing = z.infer<typeof marketplaceListingSchema>;
 

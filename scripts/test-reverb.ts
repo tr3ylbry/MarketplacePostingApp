@@ -4,20 +4,30 @@ import { z } from "zod";
 if (process.env.MARKETPLACE_TEST_BUILD !== "1" || process.env.VERCEL || !process.env.TEST_REVERB_SECRET) throw new Error("Test Reverb requires an isolated local test build.");
 const categoryId = "14d6cc96-ed7b-4521-bc21-7713c61e9dc5", conditionId = "f7a3f48c-972a-44c6-b01a-0cd27488d3f6";
 const accounts = new Map<string, Map<string, { id: string; sku: string; state: { slug: string } }>>();
-let posts = 0;
+let posts = 0, deletes = 0, calls = 0;
 createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1:4312");
   const send = (data: unknown, status = 200) => { response.writeHead(status, { "Content-Type": "application/hal+json" }); response.end(JSON.stringify(data)); };
   if (url.pathname === "/health") return send({ ok: true });
   if (request.headers["x-test-secret"] !== process.env.TEST_REVERB_SECRET) return send({}, 403);
-  if (url.pathname === "/stats") return send({ posts });
+  if (url.pathname === "/stats") return send({ posts, deletes, calls, active: [...accounts.values()].reduce((n, rows) => n + rows.size, 0) });
   const token = request.headers.authorization;
   if (!token?.startsWith("Bearer fake-reverb-")) return send({}, 401);
+  calls++;
   let listings = accounts.get(token); if (!listings) { listings = new Map(); accounts.set(token, listings); }
   if (url.pathname === "/api/shop") return send({ id: "shop-test", name: "Sandbox Test Shop", shipping_profiles: [{ id: "profile-test", name: "Test shipping profile" }] });
   if (url.pathname === "/api/categories/flat") return send({ categories: [{ uuid: categoryId, full_name: "Guitars / Electric", listable: true }] });
   if (url.pathname === "/api/listing_conditions") return send({ conditions: [{ uuid: conditionId, display_name: "Good" }] });
-  if (url.pathname === "/api/my/listings") return send({ listings: [...listings.values()].filter(l => l.sku === url.searchParams.get("sku")), _links: {} });
+  if (url.pathname === "/api/my/listings") {
+    if (url.searchParams.get("state") !== "all") return send({}, 412);
+    return send({ listings: [...listings.values()].filter(l => l.sku === url.searchParams.get("sku")), _links: {} });
+  }
+  if (url.pathname.startsWith("/api/listings/") && request.method === "DELETE") {
+    const id = url.pathname.slice("/api/listings/".length); deletes++;
+    if (!listings.has(id)) return send({}, 404);
+    if (listings.get(id)?.state.slug !== "draft") return send({}, 403);
+    listings.delete(id); response.writeHead(204); response.end(); return;
+  }
   if (url.pathname === "/api/listings" && request.method === "POST") {
     try {
       let body = ""; for await (const chunk of request) { body += chunk; if (body.length > 100000) throw new Error(); }

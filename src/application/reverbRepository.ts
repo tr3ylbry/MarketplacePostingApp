@@ -11,6 +11,11 @@ export interface DraftReview {
   connectionVersion: string; listingVersion: string; selection: ReverbSelection; expiresAt: string;
 }
 export interface DraftClaim { review: DraftReview; attemptId: string; postAttempted: boolean; externalId?: string }
+export interface ManagementClaim {
+  ownerId: string; listingId: string; environment: ReverbEnvironment; shopId: string;
+  connectionVersion: string; listingVersion: string; token: string;
+  externalId?: string; postAttempted: boolean;
+}
 export interface ReverbRepository {
   connection(ownerId: string, environment: ReverbEnvironment): Promise<ReverbConnection | null>;
   connect(connection: ReverbConnection): Promise<void>;
@@ -22,4 +27,8 @@ export interface ReverbRepository {
   rejectedPost(claim: DraftClaim): Promise<void>;
   finish(claim: DraftClaim, remote: ReverbRemoteListing): Promise<void>;
   release(claim: DraftClaim): Promise<void>;
+  claimManagement(ownerId: string, environment: ReverbEnvironment, listingId: string): Promise<ManagementClaim>;
+  verifyManagement(claim: ManagementClaim): Promise<void>;
+  reconcile(claim: ManagementClaim, remote: ReverbRemoteListing | null): Promise<void>;
+  releaseManagement(claim: ManagementClaim): Promise<void>;
 }
