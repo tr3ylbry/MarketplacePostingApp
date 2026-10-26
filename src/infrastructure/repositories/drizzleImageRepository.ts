@@ -22,14 +22,36 @@ export async function lockOwnedListing(tx: Transaction, owner: string, listingId
 async function touch(tx: Transaction, listingId: string) {
   await tx.update(listings).set({ updatedAt: sql`greatest(clock_timestamp(), ${listings.updatedAt} + interval '1 millisecond')` }).where(eq(listings.id, listingId));
 }
-export async function queueCleanup(tx: Transaction, paths: string[]) {
-  if (paths.length) await tx.insert(imageCleanup).values(paths.map(pathname => ({ pathname,
-    notBefore: new Date(Date.now() + UPLOAD_TTL_MS + CLEANUP_GRACE_MS).toISOString() })))
+type CleanupObject = { pathname: string; providerRetainUntil?: string | null };
+export function immediateCleanupPaths(objects: CleanupObject[]) {
+  return objects.filter(object => !object.providerRetainUntil || Date.parse(object.providerRetainUntil) <= Date.now()).map(object => object.pathname);
+}
+export async function queueCleanup(tx: Transaction, paths: (string | CleanupObject)[]) {
+  if (paths.length) await tx.insert(imageCleanup).values(paths.map(path => {
+    const object = typeof path === "string" ? { pathname: path } : path;
+    return { pathname: object.pathname, notBefore: new Date(Math.max(Date.now() + UPLOAD_TTL_MS + CLEANUP_GRACE_MS,
+      object.providerRetainUntil ? Date.parse(object.providerRetainUntil) : 0)).toISOString() };
+  }))
     .onConflictDoUpdate({ target: imageCleanup.pathname, set: { notBefore: sql`greatest(${imageCleanup.notBefore}, excluded.not_before)` } });
 }
 
 export class DrizzleImageRepository implements ImageRepository {
   constructor(private readonly db: Database) {}
+
+  async retainForProvider(owner: string, listingId: string, imageId: string, retainUntil: string) {
+    if (!Number.isFinite(Date.parse(retainUntil))) throw new ImageOperationError("Invalid retention deadline.");
+    return this.db.transaction(async tx => {
+      // Same parent lock as remove/delete/reorder: either retention wins and is
+      // copied to the orphan ledger, or deletion wins and signing is denied.
+      await lockOwnedListing(tx, owner, listingId);
+      const [image] = await tx.update(listingImages).set({
+        providerRetainUntil: sql`greatest(${listingImages.providerRetainUntil}, ${retainUntil}::timestamptz)`,
+      }).where(and(eq(listingImages.listingId, listingId), eq(listingImages.id, imageId), eq(listingImages.storageProvider, "vercel-blob")))
+        .returning({ pathname: listingImages.pathname });
+      if (!image?.pathname) throw new ImageOperationError("Image not found.");
+      return image.pathname;
+    });
+  }
 
   async reserve(owner: string, listingId: string, input: UploadInput): Promise<ImageUpload> {
     const values = uploadInputSchema.parse(input);
@@ -104,13 +126,13 @@ export class DrizzleImageRepository implements ImageRepository {
       const rows = await tx.select().from(listingImages).where(eq(listingImages.listingId, listingId)).orderBy(asc(listingImages.order));
       const removed = rows.find(row => row.id === imageId);
       if (!removed) return [];
-      const paths = removed.pathname ? [removed.pathname] : [];
+      const paths = removed.pathname ? [{ pathname: removed.pathname, providerRetainUntil: removed.providerRetainUntil }] : [];
       await queueCleanup(tx, paths);
       await tx.delete(listingImages).where(eq(listingImages.listingId, listingId));
       const kept = rows.filter(row => row.id !== imageId).map((row, order) => ({ ...row, order }));
       if (kept.length) await tx.insert(listingImages).values(kept);
       await touch(tx, listingId);
-      return paths;
+      return immediateCleanupPaths(paths);
     });
   }
 

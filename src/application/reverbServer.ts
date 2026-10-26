@@ -8,6 +8,8 @@ import { reverbGateway } from "@reverb-gateway";
 import { imageStorage } from "@image-storage";
 import { createReverbService } from "./reverbService";
 import type { EncryptedCredential } from "./reverbRepository";
+import { DrizzleImageRepository } from "../infrastructure/repositories/drizzleImageRepository";
+import { createProviderImageAccess } from "./providerImageAccess";
 function cipher() {
   const key = process.env.REVERB_CREDENTIAL_ENCRYPTION_KEY;
   if (key && key === process.env.BETTER_AUTH_SECRET) throw new Error("Reverb encryption requires a dedicated key.");
@@ -17,5 +19,6 @@ export function reverbService() {
   const db = getDatabase();
   return createReverbService(new DrizzleReverbRepository(db), new DrizzleListingRepository(db), reverbGateway(),
     { encrypt: (token: string, context: string) => cipher().encrypt(token, context),
-      decrypt: (value: EncryptedCredential, context: string) => cipher().decrypt(value, context) }, imageStorage, reverbEnvironment());
+      decrypt: (value: EncryptedCredential, context: string) => cipher().decrypt(value, context) },
+    createProviderImageAccess(new DrizzleImageRepository(db), imageStorage), reverbEnvironment());
 }

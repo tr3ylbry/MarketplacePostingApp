@@ -34,6 +34,7 @@ export const listingImages = pgTable("listing_images", {
   storageProvider: text("storage_provider").notNull(), pathname: text("pathname"),
   originalFilename: text("original_filename").notNull(), contentType: text("content_type"), byteSize: integer("byte_size"),
   uploadedAt: instant("uploaded_at"),
+  providerRetainUntil: instant("provider_retain_until"),
   order: integer("sort_order").notNull(), altText: text("alt_text"),
 }, table => [
   uniqueIndex("listing_images_order_idx").on(table.listingId, table.order),

@@ -5,7 +5,7 @@ import { ListingConflictError, ListingUnavailableError, type ListingRepository }
 import { ownerIdSchema, type OwnerId } from "../../application/owner";
 import * as schema from "../db/schema";
 import { listingFromRows, listingToRows } from "./listingMapping";
-import { lockOwnedListing, queueCleanup } from "./drizzleImageRepository";
+import { immediateCleanupPaths, lockOwnedListing, queueCleanup } from "./drizzleImageRepository";
 
 type Database = NodePgDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -67,13 +67,14 @@ export class DrizzleListingRepository implements ListingRepository {
     ownerIdSchema.parse(ownerId);
     return this.db.transaction(async tx => {
       await lockOwnedListing(tx, ownerId, id);
-      const images = await tx.select({ pathname: listingImages.pathname }).from(listingImages).where(eq(listingImages.listingId, id));
+      const images = await tx.select({ pathname: listingImages.pathname, providerRetainUntil: listingImages.providerRetainUntil }).from(listingImages).where(eq(listingImages.listingId, id));
       const pending = await tx.select({ pathname: schema.imageUploads.pathname }).from(schema.imageUploads).where(eq(schema.imageUploads.listingId, id));
-      const paths = [...images, ...pending].flatMap(image => image.pathname ? [image.pathname] : []);
+      const paths = [...images, ...pending.map(image => ({ ...image, providerRetainUntil: null }))]
+        .flatMap(image => image.pathname ? [{ pathname: image.pathname, providerRetainUntil: image.providerRetainUntil }] : []);
       await queueCleanup(tx, paths);
       const deleted = await tx.delete(listings).where(and(eq(listings.ownerId, ownerId), eq(listings.id, id))).returning({ id: listings.id });
       if (!deleted.length) throw new ListingUnavailableError();
-      return paths;
+      return immediateCleanupPaths(paths);
     });
   }
 

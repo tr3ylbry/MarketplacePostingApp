@@ -3,6 +3,7 @@ import type { OwnerId } from "./owner";
 import type { ImageUpload, UploadInput } from "./imageStorage";
 
 export interface ImageRepository {
+  retainForProvider(owner: OwnerId, listingId: string, imageId: string, retainUntil: string): Promise<string>;
   reserve(owner: OwnerId, listingId: string, input: UploadInput): Promise<ImageUpload>;
   resolveUpload(owner: OwnerId, listingId: string, imageId: string): Promise<ImageUpload | null>;
   finalize(owner: OwnerId, listingId: string, imageId: string, source: BlobImageSource): Promise<void>;

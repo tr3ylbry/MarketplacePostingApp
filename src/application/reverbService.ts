@@ -89,7 +89,7 @@ export function createReverbService(repo: ReverbRepository, listings: ListingRep
           // Only trusted, owner-loaded metadata reaches the signing capability.
           for (const image of [...listing.images].sort((a, b) => a.order - b.order)) {
             if (image.source.kind !== "vercel-blob") throw new ReverbDraftError("Re-upload unavailable photos.");
-            photos.push(await images.createProviderReadAccess(image.source.pathname));
+            photos.push(await images.createProviderReadAccess(owner, listing.id, image.id));
           }
           await repo.markPosting(claim);
           try { remote = accept([await provider(c, token => gateway.createDraft(token, { ...payload, photos, publish: false }))]); }

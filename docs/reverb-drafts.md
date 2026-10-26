@@ -49,6 +49,10 @@ Authenticated user → owner-scoped Listing
 
 ### Persistence and security
 
+Provider image access uses a separate owner/listing/image boundary. Migration `0004_provider_image_retention.sql` adds nullable `listing_images.provider_retain_until` (existing images have no retention). A short parent-locked transaction revalidates the durable image and extends its deadline using `max(existing, requested)` before signing outside the transaction. Private provider URLs have a fixed 15-minute expiry; retention includes a one-minute safety margin. Signing failure leaves safe extra retention, never rolls it back.
+
+Removing an image or listing still removes it from the app immediately. Retained source Blobs are not immediately deleted: their trusted paths and deadlines are copied to the existing cleanup ledger before image metadata/cascades disappear. `notBefore` is the later of ordinary cleanup timing and retention expiry. The operator `npm run images:cleanup` deletes eligible orphans and retries failures; no new worker or provider polling is introduced. This protects asynchronous Reverb ingestion from concurrent local deletion. Ordinary 60-second browser reads do not extend retention.
+
 Migration `0003_flawless_lyja.sql` adds:
 
 - `reverb_connections`: one owner/environment connection; AES-256-GCM ciphertext, random 96-bit IV, authentication tag, shop identity and a new UUID version on each replacement. Owner/environment are authenticated additional data, preventing ciphertext swapping across users/environments. Only safe connection metadata reaches client components.

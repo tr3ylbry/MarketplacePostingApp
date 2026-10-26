@@ -13,6 +13,10 @@ import { reverbSku } from "../../application/reverbDraft";
 import { ReverbProviderError, type ReverbGateway, type ReverbPayload, type ReverbRemoteListing } from "../../application/reverbGateway";
 import { listingFixture } from "../../test/fixtures";
 import { testDatabaseUrl } from "../../test/testDatabase";
+import { createProviderImageAccess } from "../../application/providerImageAccess";
+import { createImageService } from "../../application/imageService";
+import { DrizzleImageRepository } from "./drizzleImageRepository";
+import { MemoryImageStorage } from "../../test/storage/memoryImageStorage";
 const pool = new Pool({ connectionString: testDatabaseUrl() });
 const db = drizzle(pool, { schema }), repo = new DrizzleReverbRepository(db), listings = new DrizzleListingRepository(db);
 const cipher = new CredentialCipher(randomBytes(32).toString("hex"));
@@ -109,6 +113,32 @@ it("persists only draft identity, never acquisition cost, signed URLs or publish
   expect(JSON.stringify(listing)).not.toContain("signature");
   expect(JSON.stringify(await db.select().from(schema.reverbDraftRequests))).not.toContain("signature");
   const payload = gateway.createDraft.mock.calls[0][1]; expect(payload.publish).toBe(false); expect(payload).not.toHaveProperty("acquisitionCost");
+  expect(images.createProviderReadAccess).toHaveBeenCalledWith(a, listingId, listing.images[0].id);
+});
+it("keeps source bytes available when an image is removed after the Reverb POST starts", async () => {
+  const [image] = await db.select().from(schema.listingImages).where(eq(schema.listingImages.listingId, listingId));
+  const storage = new MemoryImageStorage();
+  storage.objects.set(image.pathname!, { bytes: new Uint8Array(68), type: "image/png" });
+  const imageRepo = new DrizzleImageRepository(db);
+  let capabilityExpiry = 0;
+  const access = createProviderImageAccess(imageRepo, { signProviderReadAccess: async (_path, expiry) => {
+    assertOutside(); capabilityExpiry = expiry; return "https://private.example/image?signature=temporary";
+  } });
+  const protectedService = createReverbService(repo, listings, gateway, cipher, access, "sandbox");
+  gateway.createDraft.mockImplementationOnce(async (_token, payload) => {
+    assertOutside(); expect(payload.publish).toBe(false);
+    await createImageService(imageRepo, storage).remove(a, listingId, image.id);
+    expect((await listings.getById(a, listingId))?.images).toEqual([]);
+    expect(storage.objects.has(image.pathname!)).toBe(true);
+    const [entry] = await db.select().from(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, image.pathname!));
+    expect(Date.parse(entry.notBefore)).toBeGreaterThan(capabilityExpiry);
+    return { id: "retained-remote", sku: payload.sku, state: "draft" };
+  });
+  try {
+    const prepared = await protectedService.prepare(a, listingId, choices);
+    await protectedService.createDraft(a, prepared.reviewId);
+    expect(gateway.createDraft).toHaveBeenCalledOnce(); expect(storage.deleted).toEqual([]);
+  } finally { await db.delete(schema.imageCleanup).where(eq(schema.imageCleanup.pathname, image.pathname!)); }
 });
 it("reconciles a remote SKU match and repeated actions without another POST", async () => {
   const first = await review(); await service.createDraft(a, first.reviewId);
