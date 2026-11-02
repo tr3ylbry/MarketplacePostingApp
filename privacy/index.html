@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="How MarketplacePostingApp handles development account, listing, image and marketplace connection data.">
+  <title>Development Privacy Notice — MarketplacePostingApp</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #20262d; background: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-size: 1rem; line-height: 1.65; }
+    main { max-width: 48rem; margin: auto; padding: 2.5rem 1.25rem 4rem; overflow-wrap: anywhere; }
+    h1, h2 { line-height: 1.25; }
+    h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); margin: .5rem 0 1rem; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; }
+    a { color: #154f91; text-underline-offset: .15em; }
+    a:focus-visible { outline: 3px solid #154f91; outline-offset: 4px; }
+    .label { color: #465362; }
+    li + li { margin-top: .5rem; }
+    @media print { main { max-width: none; padding: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="label">MarketplacePostingApp</p>
+      <h1>Development Privacy Notice</h1>
+      <p>Last updated <time datetime="2026-11-02">November 2, 2026</time>.</p>
+    </header>
+
+    <h2>Scope and current operation</h2>
+    <p>MarketplacePostingApp is a development project for organizing items, storing private listing photos, previewing marketplace formats and explicitly managing Reverb drafts. The application currently runs locally, with local PostgreSQL storage and external authentication, image-storage and marketplace services. Development testing uses GitHub authentication, a development Vercel Private Blob store and Reverb Sandbox. It is not a publicly deployed application.</p>
+
+    <h2>Information used and why</h2>
+    <ul>
+      <li><strong>Sign-in and sessions:</strong> GitHub account identifiers, name, email and avatar information identify the user and support owner-authorized access. Better Auth stores provider account records, encrypted OAuth tokens where applicable, and database-backed sessions. Session records may include IP address and browser information.</li>
+      <li><strong>Items and photos:</strong> entered titles, descriptions, prices, item attributes, marketplace preferences and publication history support inventory and draft workflows. Image bytes and metadata, including original filenames, file types, size and order, support uploads and private viewing. Image checks do not guarantee removal of embedded metadata; avoid uploading personal or location-sensitive photos for testing.</li>
+      <li><strong>Reverb connections and actions:</strong> an encrypted Personal Access Token, shop identity, environment and connection timestamps support explicit provider requests. Draft reviews, attempt records and remote listing IDs/status help reconcile actions and avoid unsafe duplicate requests.</li>
+    </ul>
+
+    <h2>Storage and third-party services</h2>
+    <p>PostgreSQL holds application records; Vercel Private Blob holds uploaded image bytes. GitHub handles authentication. Explicit Reverb draft creation sends selected listing content and temporary private photo access to Reverb, which can retain its own copies. Ordinary local saves and page navigation do not automatically push listing content to Reverb.</p>
+    <p>These providers process information involved in their services under their own policies. This notice describes the application, not a guarantee about provider retention or operations. This public notice is a static GitHub Pages page, separate from the application and database. It contains no analytics scripts, tracking pixels, forms or application authentication. GitHub Pages records visitor IP addresses for security purposes, as described in <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection">GitHub's hosting documentation</a>.</p>
+
+    <h2>Planned eBay integration — not active</h2>
+    <p>eBay seller OAuth is not implemented. The proposed Sandbox integration would obtain seller authorization, verify the consenting seller's identity on the server and store authorization metadata and encrypted access/refresh tokens. Later separately approved stages would send selected inventory data, create unpublished offers and export selected photos to eBay. These are plans, not current features or permission to make provider writes. This notice must be reviewed again against the delivered integration before seller authorization is enabled.</p>
+
+    <h2>Security and browser data</h2>
+    <p>The server checks authenticated ownership before accessing listings, connections or images. Existing Reverb credentials are encrypted server-side; GitHub OAuth token encryption is configured through Better Auth. This does not mean every database field is encrypted, and encryption cannot protect data if the running server or its keys are compromised.</p>
+    <p>Session cookies are HttpOnly and SameSite=Lax; Secure cookies are used on HTTPS origins. The current local setup permits HTTP only on loopback. Provider credentials and signed photo URLs are not persisted in browser localStorage/sessionStorage or intentionally written to application logs. Temporary image URLs are bearer access: anyone receiving a valid URL can use it until expiry, and downloaded copies cannot be recalled.</p>
+    <p>Older local listings may remain in browser storage. Import is an explicit action and does not delete that original browser data. PostgreSQL is the source of truth for normal current use.</p>
+
+    <h2>Disconnection and deletion</h2>
+    <p>Signing out ends the current application session; it does not erase account or listing records or revoke provider authorization. Reverb disconnection removes the local stored connection, not the provider's token or remote drafts, and cannot cancel a request already in flight. GitHub and Reverb authorizations can be managed or revoked through those providers. An eBay disconnection/revocation flow is still planned.</p>
+    <p>Deleting a local listing removes its application records and queues photo cleanup. It does not automatically delete a remote Reverb draft. Remote draft deletion is a separate explicit action; it leaves the local item and photos intact. Removing a local photo does not erase copies already downloaded by a provider or recipient.</p>
+
+    <h2>Retention and limits</h2>
+    <p>There is no fixed automatic account-data deletion schedule or complete self-service account-erasure interface. Development records remain until removed or cleaned up. Privacy/deletion requests require review by the project maintainer; deletion timing and scope depend on the records, service and available controls. No immediate or complete erasure guarantee is made.</p>
+    <p>Removing an image or listing hides it from the application immediately, but physical image deletion may be delayed. Photos shared for Reverb ingestion remain protected for at least the issued 15-minute capability lifetime plus a one-minute safety margin. A durable cleanup ledger and operator-run cleanup handle deferred objects and retries; physical deletion may occur later if cleanup has not run or a provider operation fails. Local deletion does not establish deletion from independent provider copies or any separately maintained backups.</p>
+
+    <h2>Privacy questions and requests</h2>
+    <p>For private privacy questions or deletion requests, email the project maintainer at <a href="mailto:sgharryb14@gmail.com">sgharryb14@gmail.com</a>.</p>
+    <p>Do not send passwords, access tokens, authorization codes or other credentials with a request. For non-sensitive technical questions only, use <a href="https://github.com/tr3ylbry/MarketplacePostingApp/issues">MarketplacePostingApp Issues</a>. Issues are public: do not post private account details, contact information or private listings there.</p>
+
+    <h2>Changes to this notice</h2>
+    <p>This notice will need review as the development application changes, particularly before enabling eBay authorization or any public application deployment.</p>
+  </main>
+</body>
+</html>
