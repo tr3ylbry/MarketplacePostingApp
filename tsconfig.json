@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "paths": {
+      "@ebay-runtime": ["./src/infrastructure/ebay/runtime.ts"],
       "@reverb-gateway": ["./src/infrastructure/reverb/reverbClient.ts"],
       "@image-storage": [
         "./src/infrastructure/storage/vercelBlobImageStorage.ts"

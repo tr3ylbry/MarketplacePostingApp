@@ -3,6 +3,7 @@ import { pgTable, text, numeric, timestamp, jsonb, integer, index, uniqueIndex, 
 import type { ReverbSelection } from "../../application/reverbRepository";
 import { users } from "./authSchema";
 export { users, sessions, accounts, verifications } from "./authSchema";
+export { ebayConnections, ebayOauthStates } from "./ebaySchema";
 
 export const listingStatus = pgEnum("listing_status", ["draft", "active", "sold", "archived"]);
 export const marketplace = pgEnum("marketplace", ["ebay", "craigslist", "reverb", "offerup", "facebook-marketplace"]);

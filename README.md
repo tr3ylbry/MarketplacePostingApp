@@ -2,7 +2,7 @@
 
 Draft an item once, preview marketplace-specific fields, and explicitly create a Reverb **draft** through your own connected account. The V2 foundation uses Next.js App Router, Better Auth, PostgreSQL/Drizzle and durable private images, preserving the domain and pure marketplace mappers established in PR #1.
 
-**No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; other marketplaces remain manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
+**No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; eBay has a local-only Sandbox seller-connection foundation (real eBay OAuth/identity acceptance pending), not listing writes. Other marketplace output remains manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
 
 **Start with the [system architecture guide](docs/architecture.md)** for the system map, database model, security boundaries and integration lifecycle. This README covers development and operations; the [Reverb guide](docs/reverb-drafts.md) covers provider-specific behavior. Stage 7 documents the implemented foundation without adding runtime features.
 
@@ -78,6 +78,14 @@ Tokens require `public`, `read_listings`, `write_listings`, and `read_profile` (
 See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](docs/reverb-drafts.md). Migration `0003_flawless_lyja.sql` introduced encrypted connections, focused draft-attempt records, and provider environment/shop context to `MarketplaceListing`; it did not add a second publication model. Add `REVERB_ENVIRONMENT=sandbox` and a securely generated `REVERB_CREDENTIAL_ENCRYPTION_KEY` to ignored server configuration. Real Sandbox draft creation, private photo ingestion, explicit shipping rates, duplicate reconciliation and remote draft deletion passed on 2026-10-24. PR #6 additionally verified passive-page zero traffic, refresh, app-driven deletion, recreation and external-deletion detection on 2026-10-25; disposable data was cleaned up after image retention expired. CI continues to use isolated fakes.
 
 ## Routes and images
+
+### eBay Sandbox connection foundation
+
+`/settings/integrations/ebay` uses explicit authorization-code OAuth, not a PAT form. It adds one-use session/owner-bound state, independently encrypted access/refresh tokens, refresh leases/version fencing and read-only authenticated Trading GetUser identity verification. Passive navigation makes no provider request. The registered accepted/declined routes use trusted `https://127.0.0.1:3000`; `npm run dev:https` binds only to that loopback origin with an approved certificate outside Git. HTTP development remains available with matching auth configuration.
+
+See [eBay HTTPS, security boundaries and pending two-seller validation](docs/ebay-oauth.md) before configuring credentials or certificate trust. Real eBay consent/token exchange requires separate authorization and is not claimed complete. No inventory, offer, media, listing or policy writes are implemented. Migration `0006_broken_warbird.sql` adds owner-scoped `ebay_connections` and `ebay_oauth_states` without changing existing listing/Reverb data.
+
+### Listing routes
 
 `/` redirects to `/listings`. `/sign-in` offers GitHub sign-in; `/api/auth/[...all]` hosts the auth library handlers. Inventory is at `/listings`; creation at `/listings/new`; detail/previews at `/listings/[id]`; editing at `/listings/[id]/edit`. All listing routes and create/update/delete/import actions require a server-validated session; unauthenticated requests redirect to sign-in. Data is server-rendered; forms, confirmation, clipboard/preview navigation and file selection are client interactions. The account name and sign-out button are the only account UI. Sign-out revokes the current session and performs a full navigation to clear user-specific router state.
 
@@ -209,7 +217,7 @@ npm run check            # All of the above, including production build and E2E
 
 GitHub Actions uses an ephemeral PostgreSQL service for pull requests and pushes to `main`/`tbryant/dev`. It runs install, lint, typecheck, unit tests, integration tests, production build and Chromium E2E. Failure traces are retained briefly. No personal database or deployment credentials are used.
 
-Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb lifecycle tests and five Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312 with real application/server/database boundaries: connect, explicitly load options, create, refresh, delete and recreate, plus zero Reverb traffic on passive navigation or ordinary saves. Production never resolves the test gateway. Exact final results are recorded in the PR.
+Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb/OAuth lifecycle tests and seven Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312: connect, explicitly load options, create, refresh, delete and recreate, plus zero traffic on passive navigation or ordinary saves. Two eBay workflows use a separate fake on port 4313 for callback/denial/replay, connection/reload/refresh/disconnect, ownership and browser privacy. Real provider credentials are not used in CI. Production never resolves test gateways. Exact final results are recorded in the PR.
 
 ## Intentionally deferred
 

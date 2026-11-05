@@ -1,8 +1,8 @@
 # System architecture
 
-Marketplace Posting Assistant keeps one owner-controlled inventory and turns each item into marketplace-specific drafts. It is a Next.js application backed by PostgreSQL, with private image bytes in Vercel Blob. Reverb supports explicit draft creation, status checks, recovery and deletion; eBay, Craigslist and OfferUp/Facebook currently provide local previews only.
+Marketplace Posting Assistant keeps one owner-controlled inventory and turns each item into marketplace-specific drafts. It is a Next.js application backed by PostgreSQL, with private image bytes in Vercel Blob. Reverb supports explicit draft creation, status checks, recovery and deletion. eBay adds a local-only Sandbox seller-connection foundation alongside its preview mapper, not listing writes. Craigslist and OfferUp/Facebook provide local previews only.
 
-This describes the implemented V2 system through Stage 6, not a public-launch or future eBay design. Development validation uses a local application, GitHub OAuth, a development PRIVATE Blob store and Reverb Sandbox. There is no live-publishing action, background synchronization or deployment automation in the repository.
+This describes the V2 foundation plus the Stage 9A local-only eBay Sandbox connection implementation. Real eBay OAuth/two-seller identity acceptance remains pending separate authorization; it is not an Inventory API or public-launch design. Development validation uses a local application, GitHub OAuth, a development PRIVATE Blob store and Reverb Sandbox. There is no live-publishing action, background synchronization or application deployment automation.
 
 ## System map
 
@@ -14,7 +14,8 @@ Browser
      Application services
        ├─ owner-scoped repositories → Drizzle → PostgreSQL
        ├─ image storage boundary → Vercel PRIVATE Blob
-       └─ Reverb gateway → Sandbox (default) or configured Live host
+       ├─ Reverb gateway → Sandbox (default) or configured Live host
+       └─ eBay OAuth / read-only GetUser → Sandbox only (explicit actions)
 
 Canonical Listing → pure marketplace mappers → preview fields / warnings
 ```
@@ -61,6 +62,8 @@ The [Drizzle schema](../src/infrastructure/db/schema.ts), [auth schema](../src/i
 | `reverb_connections` | One encrypted credential and validated shop identity per owner/environment |
 | `reverb_draft_requests` | Version-bound review, create lease and durable attempted-POST fence |
 | `reverb_management_leases` | Short-lived coordination for explicit refresh/delete, not a job queue |
+| `ebay_connections` | Owner-scoped Sandbox seller identity, encrypted access/refresh tokens, version and refresh lease |
+| `ebay_oauth_states` | Hashed one-use session/owner/config-bound OAuth state with expiry |
 
 Listing children cascade on local deletion; cleanup intent is captured before that cascade. Deleting a user with listings is restricted. Image positions are unique within each listing, and durable paths are unique across images; foreign keys, indexes and checks reinforce ownership relationships, ordering, USD and finite amount constraints.
 
@@ -108,4 +111,6 @@ Unit/component tests cover domain, mappers and explicit UI actions. PostgreSQL i
 
 Browser localStorage is retained only for deliberate validated legacy import; it is not inventory persistence. Import never silently deletes old browser data or assigns another user's records. Pre-auth database ownership migration is a separate explicit operator workflow, documented in the [README](../README.md#existing-pre-auth-database-listings).
 
-Before adding eBay, preserve these boundaries: keep mapping pure; put HTTP in a separate gateway; validate ownership and provider identity server-side; distinguish local state from observed remote state; document uncertainty/recovery; and keep provider calls out of database transactions. Reverb's SKU/fence behavior is not evidence that another provider offers the same guarantees. eBay integration, public launch, background jobs, pagination and broader operational tooling remain future work—not features of this documentation stage.
+The [eBay Sandbox connection foundation](ebay-oauth.md) preserves these boundaries but uses authorization-code OAuth rather than a Reverb PAT. One-use state binds the active app session, owner, exact Sandbox RuName/configuration and connection version. AES-GCM tokens use independent envelopes and owner/environment/seller context. Refresh leases and conditional commits fence stale work; all provider HTTP stays outside transactions. Read-only authenticated GetUser replaces mocked Commerce Identity as the proposed identity source, with real two-seller proof still required. Exact trusted loopback HTTPS is separate from public application deployment.
+
+Reverb's SKU/fence behavior is not evidence of equivalent eBay publishing guarantees. eBay inventory/offers/media/publishing, public launch, background jobs, pagination and broader operational tooling remain future work. The eBay mapper remains pure and no such provider writes are added.
