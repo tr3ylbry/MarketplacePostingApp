@@ -9,4 +9,7 @@ playwright-report
 test-results
 .next
 next-env.d.ts
+*.pem
+*.key
+certificates/
 .next-test/

@@ -9,6 +9,11 @@ if (testBuild) {
 }
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  ...(testBuild ? { distDir: ".next-test", turbopack: { resolveAlias: { "@image-storage": "./src/test/storage/testImageStorage.ts", "@reverb-gateway": "./src/test/reverb/testReverbGateway.ts" } } } : {}),
+  agentRules: false,
+  // Keep the original IP origin for strict OAuth callback validation. Next's
+  // default NextURL normalization rewrites 127.0.0.1 to localhost.
+  skipProxyUrlNormalize: true,
+  logging: { incomingRequests: { ignore: [/^\/api\/integrations\/ebay\//, /^\/api\/auth\/callback\//] }, fetches: { fullUrl: false } },
+  ...(testBuild ? { distDir: ".next-test", turbopack: { resolveAlias: { "@image-storage": "./src/test/storage/testImageStorage.ts", "@reverb-gateway": "./src/test/reverb/testReverbGateway.ts", "@ebay-runtime": "./src/test/ebay/testRuntime.ts" } } } : {}),
 };
 export default nextConfig;
