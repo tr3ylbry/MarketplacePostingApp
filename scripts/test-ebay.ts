@@ -1,19 +1,33 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { metadataFixture } from "../src/test/ebay/metadataFixtures";
 if(process.env.MARKETPLACE_TEST_BUILD!=="1"||process.env.VERCEL||!process.env.TEST_EBAY_SECRET)throw new Error("Isolated eBay tests required.");
 const access=new Map<string,string>(),refresh=new Map<string,string>();
 let exchanges=0,refreshes=0,identities=0;
+let applicationTokens=0,metadataReads=0;
+const applications=new Set<string>();
 createServer(async(req,res)=>{
   const path=new URL(req.url??"/","http://127.0.0.1:4313").pathname;
   const send=(body:unknown,status=200)=>{res.writeHead(status,{"Content-Type":"application/json"});res.end(JSON.stringify(body));};
   if(path==="/health")return send({ok:true});
   if(req.headers["x-test-secret"]!==process.env.TEST_EBAY_SECRET)return send({},403);
-  if(path==="/stats")return send({exchanges,refreshes,identities});
+  if(path==="/stats")return send({exchanges,refreshes,identities,applicationTokens,metadataReads});
+  if(req.method==="GET"){
+    if(!applications.has(String(req.headers.authorization).replace(/^Bearer /,"")))return send({},401);
+    metadataReads++;
+    const data=metadataFixture(path,new URL(req.url??"/","http://127.0.0.1:4313").searchParams);
+    return send(data??{},data===undefined?404:200);
+  }
   if(req.method!=="POST")return send({},405);
   let body="";for await(const c of req){body+=c;if(body.length>20000)return send({},413);}
   if(path==="/identity/v1/oauth2/token"){
     if(req.headers.authorization!=="Basic "+Buffer.from("fake-client:fake-secret").toString("base64"))return send({},401);
     const form=new URLSearchParams(body),grant=form.get("grant_type");let seller:string|undefined;
+    if(grant==="client_credentials"){
+      if(form.get("scope")!=="https://api.ebay.com/oauth/api_scope")return send({},403);
+      applicationTokens++;const token="fake-application-"+randomUUID();applications.add(token);
+      return send({access_token:token,expires_in:7200,token_type:"Application Access Token"});
+    }
     if(grant==="authorization_code"){
       if(form.get("redirect_uri")!=="fake-sandbox-runame")return send({},400);
       seller=["seller-a","seller-b"].includes(form.get("code")??"")?form.get("code")!:undefined;exchanges++;

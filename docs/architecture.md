@@ -1,8 +1,8 @@
 # System architecture
 
-Marketplace Posting Assistant keeps one owner-controlled inventory and turns each item into marketplace-specific drafts. It is a Next.js application backed by PostgreSQL, with private image bytes in Vercel Blob. Reverb supports explicit draft creation, status checks, recovery and deletion. eBay adds a local-only Sandbox seller-connection foundation alongside its preview mapper, not listing writes. Craigslist and OfferUp/Facebook provide local previews only.
+Marketplace Posting Assistant keeps one owner-controlled inventory and turns each item into marketplace-specific drafts. It is a Next.js application backed by PostgreSQL, with private image bytes in Vercel Blob. Reverb supports explicit draft creation, status checks, recovery and deletion. eBay supports local-only Sandbox seller connections and read-only category/aspect/condition preparation alongside its preview mapper. Craigslist and OfferUp/Facebook provide local previews only.
 
-This describes the V2 foundation plus the Stage 9A local-only eBay Sandbox connection implementation. Real eBay OAuth/two-seller identity acceptance remains pending separate authorization; it is not an Inventory API or public-launch design. Development validation uses a local application, GitHub OAuth, a development PRIVATE Blob store and Reverb Sandbox. There is no live-publishing action, background synchronization or application deployment automation.
+This describes the V2 foundation, accepted Stage 9A local-only Sandbox OAuth and the first read-only Stage 9B slice. Real Sandbox Seller A/B authorization and stable distinct identities passed; real cross-application-owner OAuth remains deferred, with automated isolation coverage. This is not an Inventory API or public-launch design. Development validation uses a local application, GitHub OAuth, a development PRIVATE Blob store and Sandbox providers. There is no live-publishing action, background synchronization or application deployment automation.
 
 ## System map
 
@@ -15,7 +15,7 @@ Browser
        ├─ owner-scoped repositories → Drizzle → PostgreSQL
        ├─ image storage boundary → Vercel PRIVATE Blob
        ├─ Reverb gateway → Sandbox (default) or configured Live host
-       └─ eBay OAuth / read-only GetUser → Sandbox only (explicit actions)
+       └─ eBay OAuth / GetUser / read-only metadata → Sandbox only (explicit actions)
 
 Canonical Listing → pure marketplace mappers → preview fields / warnings
 ```
@@ -111,6 +111,8 @@ Unit/component tests cover domain, mappers and explicit UI actions. PostgreSQL i
 
 Browser localStorage is retained only for deliberate validated legacy import; it is not inventory persistence. Import never silently deletes old browser data or assigns another user's records. Pre-auth database ownership migration is a separate explicit operator workflow, documented in the [README](../README.md#existing-pre-auth-database-listings).
 
-The [eBay Sandbox connection foundation](ebay-oauth.md) preserves these boundaries but uses authorization-code OAuth rather than a Reverb PAT. One-use state binds the active app session, owner, exact Sandbox RuName/configuration and connection version. AES-GCM tokens use independent envelopes and owner/environment/seller context. Refresh leases and conditional commits fence stale work; all provider HTTP stays outside transactions. Read-only authenticated GetUser replaces mocked Commerce Identity as the proposed identity source, with real two-seller proof still required. Exact trusted loopback HTTPS is separate from public application deployment.
+The [eBay Sandbox connection foundation](ebay-oauth.md) preserves these boundaries but uses authorization-code OAuth rather than a Reverb PAT. One-use state binds the active app session, owner, exact Sandbox RuName/configuration and connection version. AES-GCM tokens use independent envelopes and owner/environment/seller context. Refresh leases and conditional commits fence stale work; all provider HTTP stays outside transactions. Read-only authenticated GetUser replaces mocked Commerce Identity and was verified against two distinct Sandbox sellers. Exact trusted loopback HTTPS is separate from public application deployment.
+
+[Read-only preparation](ebay-preparation.md) uses a separate base-scope application token for Taxonomy and ordinary used-condition metadata. Explicit owner-scoped actions validate the listing and connected seller before reads, then recheck listing/connection versions. The pure mapper returns an allowlisted review, never a remote-write capability. Page rendering and ordinary local saves make no provider calls; no metadata or photo URL is persisted by this slice.
 
 Reverb's SKU/fence behavior is not evidence of equivalent eBay publishing guarantees. eBay inventory/offers/media/publishing, public launch, background jobs, pagination and broader operational tooling remain future work. The eBay mapper remains pure and no such provider writes are added.

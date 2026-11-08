@@ -17,7 +17,7 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
     </div>
     <ImageGallery listing={listing} />
     <PlatformPreview listing={listing} />
-    <div className="panel"><Link href={`/listings/${encodeURIComponent(id)}/reverb`}>Prepare Reverb Draft</Link>
+    <div className="panel"><Link href={`/listings/${encodeURIComponent(id)}/reverb`}>Prepare Reverb Draft</Link>{" · "}<Link href={`/listings/${encodeURIComponent(id)}/ebay`}>Prepare eBay review</Link>
       {listing.marketplaceListings.filter(p => p.marketplace === "reverb" && p.externalListingId).map(p => <p key={p.id}>Reverb {p.providerEnvironment?.toUpperCase() ?? "legacy"}: {p.status} · {p.externalListingId}</p>)}
     </div>
   </section>;
