@@ -113,3 +113,122 @@ it("accepts an explicitly empty aspect list without accepting a missing requirem
   };
   expect((await new EbayMetadataClient(config, fetch).requirements("101")).aspects).toEqual([]);
 });
+it("accepts a realistic large tree within 8 MiB and caches only its root projection", async () => {
+  const base = transport();
+  let version = "1";
+  const full = (version: string) => ({ categoryTreeId: "0", categoryTreeVersion: version, rootCategoryNode: {
+    childCategoryTreeNodes: Array.from({ length: 20 }, (_, i) => ({
+      category: { categoryId: String(i + 1), categoryName: "Synthetic branch" },
+      childCategoryTreeNodes: Array.from({ length: 850 }, (_, j) => ({
+        category: { categoryId: String(1000 + i * 850 + j), categoryName: "Synthetic leaf " + "x".repeat(150) },
+        categoryTreeNodeLevel: 2, leafCategoryTreeNode: true,
+      })),
+    })),
+  } });
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("get_default_category_tree_id")) return json({ categoryTreeId: "0", categoryTreeVersion: version });
+    if (url.pathname.endsWith("category_tree/0")) return json(full(version));
+    return base(input, init);
+  });
+  expect(JSON.stringify(full(version)).length).toBeGreaterThan(4 * 1024 * 1024);
+  const client = new EbayMetadataClient(config, fetch);
+  const first = await client.browse();
+  expect(first.children).toHaveLength(20);
+  expect(JSON.stringify(first)).not.toMatch(/Synthetic leaf|childCategoryTreeNodes/);
+  first.children[0].name = "Mutated caller copy";
+  expect((await client.browse()).children[0].name).toBe("Synthetic branch");
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("category_tree/0"))).toHaveLength(1);
+  version = "2";
+  expect((await client.browse()).treeVersion).toBe("2");
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("category_tree/0"))).toHaveLength(2);
+  expect(fetch.mock.calls.filter(([url]) => String(url).includes("get_default_category_tree_id"))).toHaveLength(3);
+  expect(new Headers(fetch.mock.calls.find(([url]) => String(url).endsWith("category_tree/0"))?.[1]?.headers).get("Accept-Encoding")).toBe("gzip");
+});
+it("shares a concurrent full-tree request without sharing mutable results", async () => {
+  const base = transport();
+  const fetch = vi.fn<typeof globalThis.fetch>((...args) => base(...args));
+  const client = new EbayMetadataClient(config, fetch);
+  const [a, b] = await Promise.all([client.browse(), client.browse()]);
+  a.children.pop(); expect(b.children).toHaveLength(1);
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("category_tree/0"))).toHaveLength(1);
+});
+it.each(["nodes", "depth", "size"])("rejects a %s budget breach without caching a partial root", async kind => {
+  const base = transport();
+  let rootRequests = 0;
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    if (!new URL(String(input)).pathname.endsWith("category_tree/0")) return base(input, init);
+    rootRequests++;
+    if (kind === "size") return json({ padding: "x".repeat(8 * 1024 * 1024) });
+    let node: object = { category: { categoryId: "101", categoryName: "Synthetic" }, leafCategoryTreeNode: true };
+    if (kind === "depth") for (let i = 0; i < 13; i++) node = { childCategoryTreeNodes: [node] };
+    else node = { childCategoryTreeNodes: Array.from({ length: 50 }, () => ({ childCategoryTreeNodes: Array.from({ length: 1000 }, () => ({})) })) };
+    return json({ categoryTreeId: "0", categoryTreeVersion: "fixture-1", rootCategoryNode: node });
+  };
+  const client = new EbayMetadataClient(config, fetch);
+  await expect(client.browse()).rejects.toMatchObject({ code: "unavailable" });
+  await expect(client.browse()).rejects.toMatchObject({ code: "unavailable" });
+  expect(rootRequests).toBe(2);
+});
+it("serializes full-tree fetches even if concurrent callers observe different versions", async () => {
+  const base = transport(); let defaults = 0, roots = 0, active = 0, maximum = 0;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("get_default_category_tree_id")) return json({ categoryTreeId: "0", categoryTreeVersion: String(++defaults) });
+    if (url.pathname.endsWith("category_tree/0")) {
+      const version = String(++roots); maximum = Math.max(maximum, ++active);
+      if (version === "1") await gate;
+      active--;
+      return json({ ...(metadataFixture(url.pathname, url.searchParams) as object), categoryTreeVersion: version });
+    }
+    return base(input, init);
+  };
+  const client = new EbayMetadataClient(config, fetch);
+  const first = client.browse();
+  await vi.waitFor(() => expect(roots).toBe(1));
+  const second = client.browse();
+  await vi.waitFor(() => expect(defaults).toBe(2));
+  expect(roots).toBe(1); release();
+  expect((await first).treeVersion).toBe("1"); expect((await second).treeVersion).toBe("2");
+  expect(maximum).toBe(1); expect(roots).toBe(2);
+});
+it("does not reuse an old root when the provider version changes but the body is stale", async () => {
+  const base = transport(); let version = "fixture-1";
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    if (new URL(String(input)).pathname.endsWith("get_default_category_tree_id")) return json({ categoryTreeId: "0", categoryTreeVersion: version });
+    return base(input, init);
+  };
+  const client = new EbayMetadataClient(config, fetch);
+  await client.browse(); version = "new-version";
+  await expect(client.browse()).rejects.toMatchObject({ code: "unavailable" });
+});
+it("accepts observed optional constraint/condition fields while retaining the used-condition allowlist", async () => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("get_item_aspects_for_category")) return json({ aspects: ["Brand", "Type"].map(localizedAspectName => ({
+      localizedAspectName, aspectConstraint: { aspectDataType: "STRING", itemToAspectCardinality: "SINGLE", aspectMode: "FREE_TEXT", aspectRequired: true,
+        aspectUsage: "RECOMMENDED", aspectEnabledForVariations: false, aspectApplicableTo: ["PRODUCT"] },
+    })) });
+    if (path.endsWith("get_item_condition_policies")) return json({ itemConditionPolicies: [{ categoryTreeId: "0", categoryId: "101", itemConditionRequired: true,
+      itemConditions: [{ conditionId: "1000", conditionDescription: "New" }, { conditionId: "1500", conditionDescription: "Open box" },
+        { conditionId: "3000", conditionDescription: "Used" }, { conditionId: "7000", conditionDescription: "For parts or not working" }],
+    }] });
+    return base(input, init);
+  };
+  const result = await new EbayMetadataClient(config, fetch).requirements("101");
+  expect(result.aspects).toHaveLength(2);
+  expect(result.aspects[0]).toMatchObject({ required: true, maxLength: 65, values: [] });
+  expect(result.conditions.filter(c => c.supported).map(c => c.id)).toEqual(["3000", "7000"]);
+  expect(JSON.stringify(result)).not.toMatch(/aspectUsage|aspectApplicableTo/);
+});
+it.each(["empty", "missing"])("fails closed for a %s condition policy", async kind => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    if (new URL(String(input)).pathname.endsWith("get_item_condition_policies")) return json(kind === "empty" ? { itemConditionPolicies: [] } : {});
+    return base(input, init);
+  };
+  await expect(new EbayMetadataClient(config, fetch).requirements("101")).rejects.toMatchObject({ code: "unavailable" });
+});

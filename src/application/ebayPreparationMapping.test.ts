@@ -39,3 +39,9 @@ it("enforces selection membership, conditional-value exclusion and unsupported-f
   requirements.aspects[0] = { ...requirements.aspects[0], mode: "FREE_TEXT", dataType: "NUMBER" };
   expect(() => mapEbayPreparation(listingFixture(), selection(), requirements)).toThrow();
 });
+it("maps the documented for-parts enum and rejects an unknown condition even if mistakenly marked supported", () => {
+  const requirements = requirementsFixture();
+  requirements.conditions = [{ id: "7000", name: "For parts or not working", supported: true }, { id: "9999", name: "Unknown", supported: true }];
+  expect(mapEbayPreparation(listingFixture(), { ...selection(), conditionId: "7000" }, requirements).condition.inventoryEnum).toBe("FOR_PARTS_OR_NOT_WORKING");
+  expect(() => mapEbayPreparation(listingFixture(), { ...selection(), conditionId: "9999" }, requirements)).toThrow();
+});

@@ -53,6 +53,19 @@ const applicationToken = z.object({
   expires_in: z.number().int().min(61).max(86400),
   token_type: z.enum(["Application Access Token", "Bearer", "bearer"]), scope: z.string().max(4000).optional(),
 });
+// Bound work below the JSON byte cap too. Do not retain the recursive provider tree.
+function checkCategoryBudget(root: unknown) {
+  const pending = [{ value: root, depth: 0 }];
+  let count = 0;
+  while (pending.length) {
+    const { value, depth } = pending.pop()!;
+    if (++count > 50000 || depth > 12 || !value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    const descendants = (value as Record<string, unknown>).childCategoryTreeNodes;
+    if (descendants === undefined) continue;
+    if (!Array.isArray(descendants) || descendants.length > 2000 || count + pending.length + descendants.length > 50000) throw new Error();
+    for (const child of descendants) pending.push({ value: child, depth: depth + 1 });
+  }
+}
 const category = (value: z.infer<typeof node>): EbayCategory => ({
   id: value.category.categoryId, name: value.category.categoryName, leaf: value.leafCategoryTreeNode,
 });
@@ -60,6 +73,8 @@ const category = (value: z.infer<typeof node>): EbayCategory => ({
 export class EbayMetadataClient implements EbayMetadataGateway {
   private cached?: { token: string; expires: number };
   private pending?: Promise<string>;
+  private rootCache?: { key: string; branch: EbayCategoryBranch };
+  private rootPending?: { key: string; result: Promise<EbayCategoryBranch> };
   constructor(private readonly config: EbayConfig, private readonly transport: typeof fetch = fetch, private readonly clock = Date.now) {}
 
   private async json(url: URL, init: RequestInit, limit: number): Promise<unknown> {
@@ -113,24 +128,61 @@ export class EbayMetadataClient implements EbayMetadataGateway {
     return this.pending;
   }
 
-  private async get(path: string, query: Record<string, string> = {}): Promise<unknown> {
+  private async get(path: string, query: Record<string, string> = {}, limit = 8 * 1024 * 1024): Promise<unknown> {
     // Call sites below supply only fixed API paths and validated numeric IDs.
     const url = new URL("https://api.sandbox.ebay.com" + path);
     url.search = new URLSearchParams(query).toString();
-    return this.json(url, { method: "GET", headers: { Authorization: "Bearer " + await this.token(), Accept: "application/json", "Accept-Language": "en-US" } }, 8 * 1024 * 1024);
+    // fetch decompresses gzip before exposing the body. The cap applies to decoded bytes.
+    return this.json(url, { method: "GET", headers: { Authorization: "Bearer " + await this.token(), Accept: "application/json", "Accept-Language": "en-US", "Accept-Encoding": "gzip" } }, limit);
+  }
+
+  private async rootBranch(current: z.infer<typeof tree>): Promise<EbayCategoryBranch> {
+    const key = JSON.stringify([current.categoryTreeId, current.categoryTreeVersion]);
+    if (this.rootCache?.key === key) return structuredClone(this.rootCache.branch);
+    if (this.rootPending) {
+      const previous = this.rootPending;
+      try {
+        const branch = await previous.result;
+        if (previous.key === key) return structuredClone(branch);
+      } catch (error) {
+        if (previous.key === key) throw error;
+      }
+      // Serialize even different versions: concurrent full trees multiply peak memory.
+      return this.rootBranch(current);
+    }
+    // One completed root projection and one current flight, never a version-keyed map.
+    this.rootCache = undefined;
+    const flight = { key, result: this.loadRoot(current) };
+    this.rootPending = flight;
+    try {
+      const branch = await flight.result;
+      if (this.rootPending === flight) this.rootCache = { key, branch };
+      return structuredClone(branch);
+    } finally {
+      if (this.rootPending === flight) this.rootPending = undefined;
+    }
+  }
+
+  private async loadRoot(current: z.infer<typeof tree>): Promise<EbayCategoryBranch> {
+    const raw = await this.get("/commerce/taxonomy/v1/category_tree/" + current.categoryTreeId);
+    // Check descendants without a recursive parser/clone or retaining their metadata.
+    if (!raw || typeof raw !== "object") throw new Error();
+    checkCategoryBudget((raw as Record<string, unknown>).rootCategoryNode);
+    const result = root.parse(raw);
+    if (result.categoryTreeId !== current.categoryTreeId || result.categoryTreeVersion !== current.categoryTreeVersion) throw new Error();
+    return { treeId: result.categoryTreeId, treeVersion: result.categoryTreeVersion, category: null, children: result.rootCategoryNode.childCategoryTreeNodes.map(category) };
   }
 
   async browse(id?: string): Promise<EbayCategoryBranch> {
     if (id !== undefined && !ebayCategoryId.safeParse(id).success) throw new EbayMetadataError("category");
     try {
-      const current = tree.parse(await this.get("/commerce/taxonomy/v1/get_default_category_tree_id", { marketplace_id: "EBAY_US" }));
+      const current = tree.parse(await this.get("/commerce/taxonomy/v1/get_default_category_tree_id", { marketplace_id: "EBAY_US" }, 65536));
       const path = "/commerce/taxonomy/v1/category_tree/" + current.categoryTreeId;
-      if (id === undefined) {
-        const result = root.parse(await this.get(path));
-        if (result.categoryTreeId !== current.categoryTreeId || result.categoryTreeVersion !== current.categoryTreeVersion) throw new Error();
-        return { treeId: result.categoryTreeId, treeVersion: result.categoryTreeVersion, category: null, children: result.rootCategoryNode.childCategoryTreeNodes.map(category) };
-      }
-      const result = subtree.parse(await this.get(path + "/get_category_subtree", { category_id: id }));
+      if (id === undefined) return await this.rootBranch(current);
+      const raw = await this.get(path + "/get_category_subtree", { category_id: id });
+      if (!raw || typeof raw !== "object") throw new Error();
+      checkCategoryBudget((raw as Record<string, unknown>).categorySubtreeNode);
+      const result = subtree.parse(raw);
       if (result.categoryTreeId !== current.categoryTreeId || result.categoryTreeVersion !== current.categoryTreeVersion || result.categorySubtreeNode.category.categoryId !== id) throw new Error();
       return { treeId: result.categoryTreeId, treeVersion: result.categoryTreeVersion, category: category(result.categorySubtreeNode), children: (result.categorySubtreeNode.childCategoryTreeNodes ?? []).map(category) };
     } catch (error) {
