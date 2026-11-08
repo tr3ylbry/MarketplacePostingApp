@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { EbayCategoryBranch, EbayCategoryRequirements } from "../../application/ebayMetadata";
+import type { EbayAspect, EbayCategoryBranch, EbayCategoryRequirements } from "../../application/ebayMetadata";
 import type { EbayPreparationReview } from "../../application/ebayPreparationMapping";
 import { loadEbayMetadataAction, reviewEbayPreparationAction } from "../../app/listings/[id]/ebay/actions";
 
 interface Props { listingId: string; version: string; connected: boolean; brand: string; model: string }
+const supportsInput = (aspect: EbayAspect) => aspect.dataType === "STRING" && !aspect.format && !aspect.advancedType;
 export function EbayPreparation({ listingId, version, connected, brand, model }: Props) {
   const [ready, setReady] = useState(false);
   useEffect(() => { setReady(true); }, []);
@@ -25,7 +26,8 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
       setBranch(result.data.branch); setRequirements(result.data.requirements); setConditionId("");
       const defaults = result.data.requirements?.aspects.flatMap(a => {
         const value = a.name === "Brand" ? brand : a.name === "Model" ? model : "";
-        return value && a.mode === "FREE_TEXT" && a.dataType === "STRING" ? [[a.name, [value]] as [string, string[]]] : [];
+        return value && a.mode === "FREE_TEXT" && supportsInput(a) && !a.values.find(v => v.value === value)?.conditional
+          ? [[a.name, [value]] as [string, string[]]] : [];
       }) ?? [];
       setValues(Object.fromEntries(defaults));
     } catch { setError("eBay metadata could not be loaded. Try again."); }
@@ -72,7 +74,7 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
         </label>
         <p>Use truthful values. Number/date/range formats and conditional choices are deferred; they block review if required.</p>
         {requirements.aspects.map(a => {
-          const supported = a.dataType === "STRING" && !a.format && !a.advancedType;
+          const supported = supportsInput(a);
           return <label key={a.name}>{a.name}{a.required ? " (required)" : " (optional)"}
             {a.mode === "SELECTION_ONLY" ? <select multiple={a.cardinality === "MULTI"} disabled={!supported}
               value={a.cardinality === "MULTI" ? values[a.name] ?? [] : values[a.name]?.[0] ?? ""}
