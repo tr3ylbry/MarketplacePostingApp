@@ -36,6 +36,7 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   const result = await pool.query<{ owner_id: string }>("SELECT owner_id FROM listings WHERE id = $1", [segments[segments.length - 2]]);
   expect(result.rows[0].owner_id).toBe(userId);
   const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64");
+  await expect(page.getByLabel("Upload photos")).toBeEnabled();
   await page.getByLabel("Upload photos").setInputFiles(["front.png", "rear.png"].map(name => ({ name, mimeType: "image/png", buffer: fixture })));
   await expect(page.getByRole("button", { name: "Remove rear.png", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Download Photo Bundle" })).toBeEnabled();
@@ -135,6 +136,7 @@ test("explicit Reverb actions create, check, delete and replace; passive navigat
   await new DrizzleListingRepository(drizzle(pool, { schema })).create(userId, listing);
   await page.goto(`/listings/${listing.id}/edit`);
   const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64");
+  await expect(page.getByLabel("Upload photos")).toBeEnabled();
   await page.getByLabel("Upload photos").setInputFiles({ name: "reverb.png", mimeType: "image/png", buffer: fixture });
   await expect(page.getByRole("button", { name: "Remove reverb.png", exact: true })).toBeEnabled();
   await page.reload();
