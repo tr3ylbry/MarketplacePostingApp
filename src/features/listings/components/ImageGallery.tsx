@@ -1,6 +1,6 @@
 "use client";
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Listing } from "../../../domain/listing";
 import { imageName, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT } from "../../../domain/listingImage";
 import { prepareImageAction, finalizeImageAction, removeImageAction, reorderImagesAction } from "../../../app/listings/imageActions";
@@ -24,6 +24,9 @@ function uploadFile(url: string, file: File, onProgress: (percent: number) => vo
 }
 
 export function ImageGallery({ listing, onChange, disabled = false }: { listing: Listing; onChange?: (listing: Listing) => void; disabled?: boolean }) {
+  const [ready, setReady] = useState(false);
+  // Server-rendered controls must not accept files before handlers are attached.
+  useEffect(() => { setReady(true); }, []);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +96,7 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
   return <section className="panel" aria-label="Listing photos">
     <h3>Photos</h3>
     <p>Private, saved images · JPEG, PNG, WebP · 10 MiB each · up to 40. HEIC/HEIF converts to JPEG before upload.</p>
-    <fieldset disabled={disabled || busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
+    <fieldset disabled={!ready || disabled || busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
       {onChange ? <label>Upload photos<input type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} /></label> : null}
       {images.some(image => image.source.kind === "vercel-blob") ? <button className="secondary-button" type="button" onClick={bundle}>Download Photo Bundle</button> : null}
       <ol className="photo-grid" style={{ listStyle: "none", padding: 0 }}>
