@@ -10,7 +10,7 @@ const privileges = z.object({ sellerRegistrationCompleted: z.boolean(), sellingL
 const programs = z.object({ programs: z.array(z.object({ programType: text(100) })).max(100) });
 const addressPart = text(128).optional();
 const location = z.object({
-  merchantLocationKey: text(36), merchantLocationStatus: z.enum(["ENABLED", "DISABLED"]), name: text(256).optional(),
+  merchantLocationKey: text(50), merchantLocationStatus: z.enum(["ENABLED", "DISABLED"]), name: text(256).optional(),
   locationTypes: z.array(text(50)).min(1).max(10),
   location: z.object({ address: z.object({ country: z.string().regex(/^[A-Z]{2}$/), postalCode: text(16).optional(), city: addressPart, stateOrProvince: addressPart }) }),
 });

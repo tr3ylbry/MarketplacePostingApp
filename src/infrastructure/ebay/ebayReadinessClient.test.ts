@@ -23,6 +23,73 @@ it("reports empty existing settings and incomplete registration without inventin
   const result = await new EbayReadinessClient(transport(true)).inspect("fixture-access");
   expect(result).toMatchObject({ registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false, policies: { fulfillment: [], payment: [], return: [] }, locations: [] });
 });
+it.each(Array.from({ length: 14 }, (_, i) => i + 37))("accepts a %i-character merchant location key without truncation", async length => {
+  const base = transport(), key = "k".repeat(length);
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init);
+    if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].merchantLocationKey = key;
+    return json(body);
+  };
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.locations[0]).toMatchObject({ key, enabled: true, warehouse: true, addressComplete: true });
+});
+it.each([51, 100])("rejects a %i-character merchant location key", async length => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init);
+    if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].merchantLocationKey = "k".repeat(length);
+    return json(body);
+  };
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+});
+it.each(["", "   ", "key<markup>", "key\ncontrol", "key\0control"])("keeps rejecting invalid location key text %j", async key => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init);
+    if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].merchantLocationKey = key;
+    return json(body);
+  };
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+});
+it.each([undefined, null, []])("does not infer a warehouse from absent or invalid GET locationTypes: %j", async types => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init);
+    if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].locationTypes = types;
+    return json(body);
+  };
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+});
+it("still rejects an oversized otherwise-valid location response with a 50-character key", async () => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init);
+    if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].merchantLocationKey = "k".repeat(50); body.unused = "x".repeat(1024 * 1024);
+    return json(body);
+  };
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+});
+it("keeps the aggregate response-size bound across individually valid pages", async () => {
+  const base = transport();
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(String(input)), response = await base(input, init), body = await response.json();
+    if (url.pathname.endsWith("/location")) {
+      const offset = Number(url.searchParams.get("offset"));
+      body.total = 5; body.offset = offset;
+      body.locations = [{ ...body.locations[0], merchantLocationKey: String(offset).padStart(50, "k") }];
+      if (offset < 4) body.next = `https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=${offset + 1}`;
+    }
+    body.unused = "x".repeat(900 * 1024);
+    return json(body);
+  });
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(10);
+});
 it.each([401, 403, 404, 429, 500])("maps HTTP %i without raw provider data or automatic retries", async status => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => json({ message: "private-provider-error" }, status));
   await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.not.toThrow(/private-provider-error|fixture-access/);
@@ -51,16 +118,16 @@ it.each(["marketplace", "duplicate", "id", "partial"])("rejects %s policy data r
   await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
 });
 it("reads every inventory-location page through a reconstructed fixed URL", async () => {
-  const base = transport(); let pages = 0;
+  const base = transport(), keys = ["a".repeat(37), "b".repeat(50)]; let pages = 0;
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if (!url.pathname.endsWith("/location")) return base(input, init);
     pages++;
     const original = readinessFixture(url.pathname, url.searchParams) as { locations: object[] };
     const offset = Number(url.searchParams.get("offset"));
-    return json({ total: 2, offset, limit: 100, locations: [original.locations[offset]], ...(offset === 0 ? { next: "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=1" } : {}) });
+    return json({ total: 2, offset, limit: 100, locations: [{ ...original.locations[offset], merchantLocationKey: keys[offset] }], ...(offset === 0 ? { next: "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=1" } : {}) });
   };
-  expect((await new EbayReadinessClient(fetch).inspect("fixture-access")).locations).toHaveLength(2);
+  expect((await new EbayReadinessClient(fetch).inspect("fixture-access")).locations.map(l => l.key)).toEqual(keys);
   expect(pages).toBe(2);
 });
 it.each(["foreign-next", "duplicate", "changed-total", "missing-next"])("rejects %s inventory pagination", async kind => {
@@ -71,7 +138,7 @@ it.each(["foreign-next", "duplicate", "changed-total", "missing-next"])("rejects
     const original = readinessFixture(url.pathname, url.searchParams) as { locations: object[] };
     const offset = Number(url.searchParams.get("offset"));
     return json({ total: kind === "changed-total" && offset > 0 ? 3 : 2, offset, limit: 100,
-      locations: [original.locations[kind === "duplicate" ? 0 : offset]],
+      locations: [{ ...original.locations[offset], merchantLocationKey: String(kind === "duplicate" ? 0 : offset).padStart(50, "k") }],
       ...(offset === 0 && kind !== "missing-next" ? { next: `${kind === "foreign-next" ? "https://api.ebay.com" : "https://api.sandbox.ebay.com"}/sell/inventory/v1/location?limit=100&offset=1` } : {}),
     });
   };
