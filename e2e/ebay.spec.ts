@@ -37,3 +37,51 @@ test("fake denied consent cannot persist a connection and callback replay fails"
   await page.goto("/settings/integrations/ebay");await page.getByRole("button",{name:"Connect eBay Sandbox",exact:true}).click();await expect(page.getByText("Authorization was cancelled.",{exact:true})).toBeVisible();await expect(page.getByText("Not connected",{exact:true})).toBeVisible();
   const result=await page.request.get(callback,{maxRedirects:0});expect(result.headers().location).toContain("result=failed");
 });
+
+test("explicit read-only category/aspect/condition preparation; passive navigation and local save make no provider calls", async ({ page, request }) => {
+  const stats = async () => await (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
+  await page.route("https://auth.sandbox.ebay.com/oauth2/authorize?**", async route => {
+    const url = new URL(route.request().url());
+    await route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:3100/api/integrations/ebay/callback?state=${url.searchParams.get("state")}&code=seller-a` }, body: "" });
+  });
+  await page.goto("/settings/integrations/ebay");
+  await page.getByRole("button", { name: "Connect eBay Sandbox", exact: true }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  const { listingFixture } = await import("../src/test/fixtures");
+  const { DrizzleListingRepository } = await import("../src/infrastructure/repositories/drizzleListingRepository");
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const schema = await import("../src/infrastructure/db/schema");
+  const repository = new DrizzleListingRepository(drizzle(pool, { schema }));
+  const listing = await repository.create(owner, listingFixture());
+  try {
+    const before = await stats();
+    const bodies: string[] = [];
+    page.on("response", r => { if (r.url().includes(`/listings/${listing.id}/ebay`)) void r.text().then(t => bodies.push(t)).catch(() => undefined); });
+    await page.goto(`/listings/${listing.id}/ebay`); await page.reload();
+    await expect(page.getByRole("button", { name: "Load eBay categories" })).toBeEnabled();
+    expect(await stats()).toEqual(before);
+    await page.getByRole("button", { name: "Load eBay categories" }).click();
+    await page.getByRole("button", { name: "Browse Synthetic musical instruments" }).click();
+    await page.getByRole("button", { name: "Select Synthetic effects pedals" }).click();
+    await page.getByLabel("eBay condition").selectOption("3000");
+    await page.getByRole("button", { name: "Prepare eBay review" }).click();
+    const review = page.getByRole("region", { name: "eBay preparation review" });
+    // The review has no staging/publishing action and exposes no provider token or source URL.
+    await expect(page.getByRole("heading", { name: "Read-only eBay review" })).toBeVisible();
+    await expect(review).toBeVisible();
+    await expect(review.getByText(listing.askingPrice.amount.toFixed(2) + " USD", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not ready for remote staging. Remaining work:")).toBeVisible();
+    await expect(page.getByText(/^mpa-ebay-[a-f0-9]{32}$/)).toBeVisible();
+    expect(bodies.join(" ")).not.toMatch(/fake-application-|fake-access-|fake-refresh-|ciphertext|authTag/);
+    expect(await page.evaluate(() => ({ local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length }))).toEqual({ local: 0, session: 0 });
+    const loaded = await stats(); expect(loaded.metadataReads).toBeGreaterThan(before.metadataReads);
+    expect(loaded.exchanges).toBe(before.exchanges); expect(loaded.identities).toBe(before.identities);
+    await page.goto(`/listings/${listing.id}/edit`);
+    await page.getByLabel("Title", { exact: false }).first().fill("Locally edited metadata fixture");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved!" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save Changes", exact: true })).toBeDisabled();
+    expect(await stats()).toEqual(loaded);
+    expect(await review.count()).toBe(0);
+  } finally { await repository.delete(owner, listing.id); }
+});

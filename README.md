@@ -2,7 +2,7 @@
 
 Draft an item once, preview marketplace-specific fields, and explicitly create a Reverb **draft** through your own connected account. The V2 foundation uses Next.js App Router, Better Auth, PostgreSQL/Drizzle and durable private images, preserving the domain and pure marketplace mappers established in PR #1.
 
-**No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; eBay has a local-only Sandbox seller-connection foundation (real eBay OAuth/identity acceptance pending), not listing writes. Other marketplace output remains manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
+**No live marketplace publishing or public deployment is included.** Reverb creation is draft-only; eBay supports local-only Sandbox seller connections and read-only listing preparation, not listing writes. Other marketplace output remains manual previews. Development and production-server scripts bind to loopback by default. Public-launch hardening remains separate work.
 
 **Start with the [system architecture guide](docs/architecture.md)** for the system map, database model, security boundaries and integration lifecycle. This README covers development and operations; the [Reverb guide](docs/reverb-drafts.md) covers provider-specific behavior. Stage 7 documents the implemented foundation without adding runtime features.
 
@@ -83,7 +83,11 @@ See [Reverb architecture, setup, failure policy and Sandbox smoke procedure](doc
 
 `/settings/integrations/ebay` uses explicit authorization-code OAuth, not a PAT form. It adds one-use session/owner-bound state, independently encrypted access/refresh tokens, refresh leases/version fencing and read-only authenticated Trading GetUser identity verification. Passive navigation makes no provider request. The registered accepted/declined routes use trusted `https://127.0.0.1:3000`; `npm run dev:https` binds only to that loopback origin with an approved certificate outside Git. HTTP development remains available with matching auth configuration.
 
-See [eBay HTTPS, security boundaries and pending two-seller validation](docs/ebay-oauth.md) before configuring credentials or certificate trust. Real eBay consent/token exchange requires separate authorization and is not claimed complete. No inventory, offer, media, listing or policy writes are implemented. Migration `0006_broken_warbird.sql` adds owner-scoped `ebay_connections` and `ebay_oauth_states` without changing existing listing/Reverb data.
+See [eBay HTTPS, security boundaries and acceptance evidence](docs/ebay-oauth.md) before configuring credentials or certificate trust. Real Sandbox Seller A/B OAuth, distinct stable identities, refresh, disconnect/reconnect and cancellation passed. Real cross-application-owner OAuth remains untested; automated owner-isolation tests passed, and real two-owner validation is deferred to a later multi-user or deployment-readiness milestone. New real consent/token tests still require separate authorization. No inventory, offer, media, listing or policy writes are implemented. Migration `0006_broken_warbird.sql` adds owner-scoped `ebay_connections` and `ebay_oauth_states` without changing existing listing/Reverb data.
+
+### Read-only eBay preparation
+
+Open `/listings/[id]/ebay` and explicitly load categories, browse to a verified leaf, select an allowed used condition and provide required item aspects. **Prepare eBay review** refreshes authoritative metadata and validates a pure review with a stable SKU, positive USD decimal price and quantity one. Page navigation and ordinary saves make no provider calls. This first Stage 9B slice uses a server-only base-scope application token for metadata; seller OAuth scopes are unchanged. It exports no photos, stages no inventory and creates no publication record. See [preparation boundaries and remaining dependencies](docs/ebay-preparation.md).
 
 ### Listing routes
 
@@ -217,7 +221,7 @@ npm run check            # All of the above, including production build and E2E
 
 GitHub Actions uses an ephemeral PostgreSQL service for pull requests and pushes to `main`/`tbryant/dev`. It runs install, lint, typecheck, unit tests, integration tests, production build and Chromium E2E. Failure traces are retained briefly. No personal database or deployment credentials are used.
 
-Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb/OAuth lifecycle tests and seven Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312: connect, explicitly load options, create, refresh, delete and recreate, plus zero traffic on passive navigation or ordinary saves. Two eBay workflows use a separate fake on port 4313 for callback/denial/replay, connection/reload/refresh/disconnect, ownership and browser privacy. Real provider credentials are not used in CI. Production never resolves test gateways. Exact final results are recorded in the PR.
+Validation covers domain/component/adapter tests, real PostgreSQL ownership/storage/Reverb/OAuth lifecycle tests and eight Chromium workflows. The image workflow uploads two fixtures, reloads, checks decoded images, reorders/reloads, removes/reloads, downloads a bundle and deletes the listing. It also checks foreign and unauthenticated image reads. The Reverb workflow uses a secret-protected local fake on port 4312: connect, explicitly load options, create, refresh, delete and recreate, plus zero traffic on passive navigation or ordinary saves. Three eBay workflows use a separate fake on port 4313 for callback/denial/replay, connection/reload/refresh/disconnect, ownership, browser privacy and explicit read-only metadata preparation. Real provider credentials are not used in CI. Production never resolves test gateways. Exact final results are recorded in the PR.
 
 ## Intentionally deferred
 
