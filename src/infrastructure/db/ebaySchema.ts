@@ -24,4 +24,5 @@ export const ebayOauthStates = pgTable("ebay_oauth_states", {
   hash: text("hash").primaryKey(), ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   sessionHash: text("session_hash").notNull(), configHash: text("config_hash").notNull(),
   connectionVersion: text("connection_version").notNull(), expiresAt: instant("expires_at").notNull(), consumedAt: instant("consumed_at"),
+  requestedScopes: text("requested_scopes").array().notNull().default(sql`ARRAY['https://api.ebay.com/oauth/api_scope']::text[]`),
 }, t => [index("ebay_states_owner_idx").on(t.ownerId), index("ebay_states_expiry_idx").on(t.expiresAt)]);
