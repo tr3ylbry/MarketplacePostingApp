@@ -257,3 +257,127 @@ test("private-photo preparation validates explicit bytes, retains source, and ne
     if (pathname) await pool.query("DELETE FROM image_cleanup WHERE pathname=$1", [pathname]);
   }
 });
+
+test("keyboard and mobile local walkthrough with simulated providers", async ({ page, context, request }, testInfo) => {
+  test.slow();
+  // No browser request can reach a real marketplace. The normal app also uses
+  // build-time fake adapters, a separate _test database and synthetic auth.
+  await context.route("**/*", route => {
+    const url = new URL(route.request().url());
+    return url.hostname === "127.0.0.1" && ["3100", "4311", "4312", "4313"].includes(url.port) ? route.continue() : route.abort();
+  });
+  await page.route("https://auth.sandbox.ebay.com/oauth2/authorize?**", async route => {
+    const url = new URL(route.request().url()), readiness = url.searchParams.get("scope")?.includes("sell.account.readonly");
+    await route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:3100/api/integrations/ebay/callback?state=${url.searchParams.get("state")}&code=${readiness ? "seller-a-readiness" : "seller-a"}` }, body: "" });
+  });
+  const stats = async () => (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
+  const storageStats = async () => (await request.post("http://127.0.0.1:4311/control/stats", { headers: { Authorization: `Bearer ${process.env.TEST_STORAGE_SECRET}` }, data: {} })).json();
+  const noOverflow = async () => {
+    const layout = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, width: document.documentElement.scrollWidth,
+      overflow: Array.from(document.querySelectorAll("main, section, fieldset, label, select, textarea, input")).filter(el => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1).map(el => ({ tag: el.tagName, className: el.className })) }));
+    expect(layout.width, JSON.stringify(layout)).toBeLessThanOrEqual(layout.viewport + 1);
+  };
+  let listingId: string | undefined;
+  const paths = new Set<string>();
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/listings/new");
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+    const ebay = page.getByRole("button", { name: "eBay", exact: true });
+    await ebay.focus(); await page.keyboard.press("Space"); await expect(ebay).toHaveAttribute("aria-pressed", "true");
+    expect(await ebay.evaluate(el => getComputedStyle(el).outlineStyle)).not.toBe("none");
+    await page.getByRole("button", { name: "Reverb", exact: true }).focus(); await page.keyboard.press("Space");
+    await page.getByRole("button", { name: "Continue", exact: true }).focus(); await page.keyboard.press("Enter");
+    const title = page.getByLabel("Title", { exact: false }).first(); await expect(title).toBeFocused();
+    await title.fill("Bad");
+    await page.getByRole("button", { name: "Save Listing", exact: true }).focus(); await page.keyboard.press("Enter");
+    await expect(page.getByRole("alert", { name: "Complete These Fields" })).toBeFocused();
+    await title.fill("Synthetic Walkthrough Pedal");
+    await page.getByLabel("Description", { exact: false }).fill("Generated test item; no real listing. " + "longword".repeat(35));
+    await page.getByLabel("Price", { exact: false }).first().fill("75");
+    await page.getByLabel("Brand", { exact: false }).first().fill("Synthetic");
+    await page.getByLabel("Model", { exact: false }).first().fill("Test Pedal");
+    await page.getByLabel("Shipping Rate", { exact: false }).fill("0");
+    const exit = page.getByRole("button", { name: "Exit To Home", exact: true });
+    await exit.focus(); await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Save Before Leaving?" });
+    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+    expect(await dialog.evaluate(el => el.matches(":modal"))).toBe(true);
+    await title.focus(); await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab"); await expect(dialog.getByRole("button", { name: "Exit Without Saving", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab"); await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape"); await expect(dialog).not.toBeVisible(); await expect(exit).toBeFocused();
+    await expect(title).toHaveValue("Synthetic Walkthrough Pedal");
+    await noOverflow();
+    const beforeSave = await stats();
+    await page.getByRole("button", { name: "Save Listing", exact: true }).click();
+    await expect(page).toHaveURL(/\/listings\/[^/]+\/edit$/); listingId = page.url().split("/").slice(-2)[0];
+    expect(await stats()).toEqual(beforeSave);
+    const sharp = (await import("sharp")).default;
+    const frontName = "synthetic-front-" + "x".repeat(85) + ".png";
+    const bytes = await sharp({ create: { width: 500, height: 600, channels: 3, background: "#446688" } }).png().toBuffer();
+    await expect(page.getByLabel("Upload photos")).toBeEnabled();
+    await page.getByLabel("Upload photos").setInputFiles([frontName, "synthetic-rear.png"].map(name => ({ name, mimeType: "image/png", buffer: bytes })));
+    await expect(page.getByRole("status").filter({ hasText: "2 photos saved privately." })).toBeVisible();
+    for (const row of (await pool.query("SELECT pathname FROM listing_images WHERE listing_id=$1", [listingId])).rows) paths.add(row.pathname);
+    await page.getByRole("button", { name: "Move synthetic-rear.png earlier", exact: true }).focus(); await page.keyboard.press("Enter");
+    await expect(page.getByRole("listitem", { name: "Photo 1: synthetic-rear.png", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Remove synthetic-rear.png", exact: true }).focus(); await page.keyboard.press("Enter");
+    await expect(page.getByRole("listitem", { name: "Photo 1: " + frontName, exact: true })).toBeFocused();
+    await expect(page.getByRole("status").filter({ hasText: "Photo removed from this local listing." })).toBeVisible();
+    await page.getByLabel("Title", { exact: false }).first().fill("Synthetic Walkthrough Edited");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved!" })).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Next marketplace preview" }).focus(); await page.keyboard.press("Enter");
+    await expect(page.getByRole("status", { name: "Marketplace preview position" })).toHaveText("2 / 2");
+    for (const width of [320, 390, 1280]) { await page.setViewportSize({ width, height: 900 }); await noOverflow(); }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await page.screenshot({ path: testInfo.outputPath("mobile-preview.png"), fullPage: true });
+    await page.goto(`/listings/${listingId}/ebay`);
+    await expect(page.getByRole("button", { name: "Load eBay categories" })).toBeDisabled();
+    await page.goto("/settings/integrations/ebay");
+    await page.getByRole("button", { name: "Connect eBay Sandbox", exact: true }).click();
+    await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Authorize read-only seller checks", exact: true }).click();
+    await expect(page.getByText("Permissions: Account identity, read-only account settings/business policies and read-only inventory locations.", { exact: true })).toBeVisible();
+    const connectedStats = await stats(), beforeReads = await storageStats();
+    await page.goto(`/listings/${listingId}/ebay`); await page.reload();
+    await expect(page.getByRole("button", { name: "Validate photo 1", exact: true })).toBeEnabled();
+    expect(await stats()).toEqual(connectedStats); expect(await storageStats()).toEqual(beforeReads);
+    await page.getByRole("button", { name: "Load eBay categories" }).click();
+    await page.getByRole("button", { name: "Browse Synthetic musical instruments" }).click();
+    await page.getByRole("button", { name: "Select Synthetic effects pedals" }).focus(); await page.keyboard.press("Enter");
+    await expect(page.getByText("Synthetic effects pedals", { exact: true })).toBeFocused();
+    await page.getByLabel("eBay condition").selectOption("3000");
+    await page.getByRole("button", { name: "Prepare eBay review", exact: true }).click();
+    await expect(page.getByRole("region", { name: "eBay preparation review" })).toBeFocused();
+    await page.getByRole("button", { name: "Check eBay Seller Readiness", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Seller readiness result" })).toBeVisible();
+    const preparedStats = await stats();
+    await page.getByRole("button", { name: "Validate photo 1", exact: true }).click();
+    await expect(page.getByText(/Photo verified for local export review/)).toContainText("500 × 600");
+    await expect(page.getByRole("button", { name: "Upload to eBay — unavailable", exact: true })).toBeDisabled();
+    expect(await stats()).toEqual(preparedStats); expect(preparedStats.mutations).toBe(0);
+    for (const width of [320, 390, 1280]) { await page.setViewportSize({ width, height: 900 }); await noOverflow(); }
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await page.screenshot({ path: testInfo.outputPath("desktop-preparation.png"), fullPage: true });
+    expect(await page.evaluate(() => ({ local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length }))).toEqual({ local: 0, session: 0 });
+    const passive = await stats();
+    await page.goto(`/listings/${listingId}/edit`); await page.getByLabel("Title", { exact: false }).first().fill("Synthetic Walkthrough Final");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click(); await expect(page.getByRole("status").filter({ hasText: "Saved!" })).toBeVisible();
+    await page.goto(`/listings/${listingId}/ebay`);
+    await expect(page.getByText(/Photo verified for local export review/)).toHaveCount(0); expect(await stats()).toEqual(passive);
+    expect((await pool.query("SELECT count(*)::integer n FROM marketplace_listings WHERE listing_id=$1", [listingId])).rows[0].n).toBe(0);
+  } finally {
+    if (listingId) {
+      const { DrizzleListingRepository } = await import("../src/infrastructure/repositories/drizzleListingRepository"), { drizzle } = await import("drizzle-orm/node-postgres"), schema = await import("../src/infrastructure/db/schema");
+      await new DrizzleListingRepository(drizzle(pool, { schema })).delete(owner, listingId);
+    }
+    for (const pathname of paths) {
+      await request.post("http://127.0.0.1:4311/control/delete", { headers: { Authorization: `Bearer ${process.env.TEST_STORAGE_SECRET}` }, data: { pathname } });
+      await pool.query("DELETE FROM image_cleanup WHERE pathname=$1", [pathname]);
+    }
+  }
+});

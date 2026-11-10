@@ -118,6 +118,7 @@ function CopyIcon() {
 export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
   const [selectedAdapterIndex, setSelectedAdapterIndex] = useState(0);
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState("");
   const filteredAdapters = listing
     ? adapters.filter(adapter => adapter.sites.some(site => listing.selectedPlatforms.includes(site)))
     : adapters;
@@ -128,6 +129,7 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
 
   useEffect(() => {
     setCopiedFieldKey(null);
+    setCopyError("");
   }, [listing, selectedAdapterIndex]);
 
   useEffect(() => {
@@ -154,8 +156,9 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
   const previewSites = adapter.sites.filter(site => activeListing.selectedPlatforms.includes(site));
 
   async function handleCopy(fieldKey: string, value: string) {
-    await navigator.clipboard.writeText(value);
-    setCopiedFieldKey(fieldKey);
+    setCopyError(""); setCopiedFieldKey(null);
+    try { await navigator.clipboard.writeText(value); setCopiedFieldKey(fieldKey); }
+    catch { setCopyError("Copy was unavailable. Select and copy the preview text manually."); }
   }
 
   function showPreviousPreview() {
@@ -197,18 +200,22 @@ export function PlatformPreview({ listing, onBack }: PlatformPreviewProps) {
             </button>
           ) : null}
           <div className="preview-nav">
-            <button className="secondary-button" onClick={showPreviousPreview} type="button">
+            <button aria-label="Previous marketplace preview" className="secondary-button" onClick={showPreviousPreview} type="button">
               ←
             </button>
-            <span className="summary-pill">
+            <span className="summary-pill" role="status" aria-label="Marketplace preview position">
               {clampedAdapterIndex + 1} / {filteredAdapters.length}
             </span>
-            <button className="secondary-button" onClick={showNextPreview} type="button">
+            <button aria-label="Next marketplace preview" className="secondary-button" onClick={showNextPreview} type="button">
               →
             </button>
           </div>
         </div>
       </div>
+
+      <p>Local preview only. Saving or copying this text does not create or update a marketplace listing.</p>
+      {copiedFieldKey ? <p role="status">Preview text copied.</p> : null}
+      {copyError ? <p role="alert">{copyError}</p> : null}
 
       {formatted.fields.map((field) => (
         <div className="preview-group" key={field.key}>

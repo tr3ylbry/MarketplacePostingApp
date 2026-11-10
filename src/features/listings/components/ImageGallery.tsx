@@ -1,6 +1,6 @@
 "use client";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../../../domain/listing";
 import { imageName, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT } from "../../../domain/listingImage";
 import { prepareImageAction, finalizeImageAction, removeImageAction, reorderImagesAction } from "../../../app/listings/imageActions";
@@ -32,12 +32,21 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
   const [error, setError] = useState<string | null>(null);
   const [failedReads, setFailedReads] = useState<string[]>([]);
   const [readVersion, setReadVersion] = useState(0);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const photoItems = useRef(new Map<string, HTMLLIElement>());
+  const focusAfterChange = useRef<{ id: string | null } | null>(null);
+  useEffect(() => {
+    if (busy || !focusAfterChange.current) return;
+    const { id } = focusAfterChange.current;
+    (id ? photoItems.current.get(id) : uploadInput.current)?.focus();
+    focusAfterChange.current = null;
+  }, [busy, listing.images]);
   const images = [...listing.images].sort((a, b) => a.order - b.order);
-  async function run(operation: () => Promise<void>) {
-    setBusy(true); setError(null);
-    try { await operation(); }
-    catch (error) { setError(error instanceof Error ? error.message : "Image operation failed. Try again."); }
-    finally { setBusy(false); setStatus(""); }
+  async function run(operation: () => Promise<string>) {
+    setBusy(true); setError(null); setStatus("");
+    try { setStatus(await operation()); }
+    catch (error) { setStatus(""); setError(error instanceof Error ? error.message : "Image operation failed. Try again."); }
+    finally { setBusy(false); }
   }
   async function upload(files: File[]) {
     await run(async () => {
@@ -57,6 +66,7 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
         if (!finalized.ok) throw new Error(finalized.error);
         onChange?.(finalized.data);
       }
+      return `${files.length} photo${files.length === 1 ? "" : "s"} saved privately.`;
     });
   }
   async function move(index: number, offset: number) {
@@ -66,6 +76,8 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
       const result = await reorderImagesAction(listing.id, ids);
       if (!result.ok) throw new Error(result.error);
       onChange?.(result.data);
+      focusAfterChange.current = { id: images[index].id };
+      return `Moved ${imageName(images[index])} to position ${index + offset + 1} of ${images.length}.`;
     });
   }
   async function remove(id: string) {
@@ -73,6 +85,9 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
       const result = await removeImageAction(listing.id, id);
       if (!result.ok) throw new Error(result.error);
       onChange?.(result.data);
+      const index = images.findIndex(image => image.id === id);
+      focusAfterChange.current = { id: images[index + 1]?.id ?? images[index - 1]?.id ?? null };
+      return "Photo removed from this local listing.";
     });
   }
   async function bundle() {
@@ -91,19 +106,21 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
       const url = URL.createObjectURL(zip);
       const link = document.createElement("a"); link.href = url; link.download = `${listing.title || "Listing"}_PhotoBundle.zip`; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return "Photo bundle prepared.";
     });
   }
-  return <section className="panel" aria-label="Listing photos">
+  return <section className="panel" aria-label="Listing photos" aria-busy={busy}>
     <h3>Photos</h3>
     <p>Private, saved images · JPEG, PNG, WebP · 10 MiB each · up to 40. HEIC/HEIF converts to JPEG before upload.</p>
     <fieldset disabled={!ready || disabled || busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
-      {onChange ? <label>Upload photos<input type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void upload(files); }} /></label> : null}
+      {onChange ? <label>Upload photos<input ref={uploadInput} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) void upload(files); }} /></label> : null}
+      {!images.length ? <p>No photos yet. Upload a file to save a private photo.</p> : null}
       {images.some(image => image.source.kind === "vercel-blob") ? <button className="secondary-button" type="button" onClick={bundle}>Download Photo Bundle</button> : null}
       <ol className="photo-grid" style={{ listStyle: "none", padding: 0 }}>
-        {images.map((image, index) => <li key={image.id} data-image-id={image.id}>
+        {images.map((image, index) => <li key={image.id} data-image-id={image.id} tabIndex={-1} aria-label={`Photo ${index + 1}: ${imageName(image)}`} ref={element => { if (element) photoItems.current.set(image.id, element); else photoItems.current.delete(image.id); }}>
           {image.source.kind === "vercel-blob" ? <>
             <Image unoptimized width={180} height={180} referrerPolicy="no-referrer" src={`${imageReadPath(listing.id, image.id)}?v=${readVersion}`} alt={image.altText ?? imageName(image)} onError={() => setFailedReads(current => current.includes(image.id) ? current : [...current, image.id])} />
-            {failedReads.includes(image.id) ? <button type="button" onClick={() => { setFailedReads([]); setReadVersion(value => value + 1); }}>Retry image</button> : null}
+            {failedReads.includes(image.id) ? <button type="button" aria-label={`Retry ${imageName(image)}`} onClick={() => { setFailedReads([]); setReadVersion(value => value + 1); }}>Retry image</button> : null}
           </> : <p>Legacy filename only — bytes unavailable. Upload the original file, then remove this entry.</p>}
           <p>{index + 1}. {imageName(image)}</p>
           {onChange ? <div>

@@ -61,12 +61,13 @@ export function MarketplacePicker({
 
           return (
             <button
+              aria-pressed={isSelected}
               className={`marketplace-tile ${isSelected ? "selected" : ""}`}
               key={tile.key}
               onClick={() => onToggle(tile.key)}
               type="button"
             >
-              <div className="marketplace-icon-shell">
+              <div className="marketplace-icon-shell" aria-hidden="true">
                 <MarketplaceIcon iconPath={tile.iconPath} label={tile.label} />
               </div>
               <span className="marketplace-label">{tile.label}</span>
