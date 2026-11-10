@@ -1,6 +1,6 @@
 # Read-only eBay Sandbox seller readiness
 
-This Stage 9B slice inspects existing seller settings. It cannot enroll a seller, create policies/locations, transfer photos, stage inventory, create offers or publish. The app remains local. The read-only grant and authenticated seller identity passed earlier development acceptance; complete readiness, refresh and runtime privacy acceptance remain separate gates. The enrollment-aware behavior below still needs its own bounded real Sandbox acceptance. PR #9's real metadata evidence does not validate these seller endpoints.
+This Stage 9B slice inspects existing seller settings. It cannot enroll a seller, create policies/locations, transfer photos, stage inventory, create offers or publish. The app remains local. The read-only grant and authenticated seller identity passed earlier development acceptance. The bounded real Sandbox acceptance below also verified the complete unenrolled/empty-location report, normal refresh and runtime browser privacy. Real enrolled-policy and nonempty-location behavior remain separate coverage gaps. PR #9's real metadata evidence does not validate these seller endpoints.
 
 ## Explicit permissions and actions
 
@@ -38,7 +38,7 @@ The adapter accepts this case only on the first location request (`offset=0`, `l
 
 Nonempty pages retain the original required pagination schema, stable totals, exact offsets/limits, strict reconstructed next-page requests, duplicate/50-character key checks, locationTypes validation and all page/item/request/time/byte caps. The exception cannot accept an empty later page during incomplete pagination. Registration, enrollment and unavailable policy results are preserved; Inventory write eligibility stays unverified and all resource-write flags remain false.
 
-Synthetic adapter and PostgreSQL regressions cover absent/full/partial metadata, contradictory or malformed fields and continuation, missing locations, incomplete later pages and owner/version fences. The fake-provider Chromium unenrolled-seller workflow now uses the observed sparse empty representation and must display a complete readiness report with no passive requests, policy calls, stored credentials or resource writes. **The corrected flow has not yet passed a new real Sandbox retest.** Real nonempty/multi-page/default-created locationTypes and runtime browser storage/cookie attributes remain unverified. Registration was still incomplete and enrollment absent in the prior real run; this correction changes no seller setting.
+Synthetic adapter and PostgreSQL regressions cover absent/full/partial metadata, contradictory or malformed fields and continuation, missing locations, incomplete later pages and owner/version fences. The fake-provider Chromium unenrolled-seller workflow uses the observed sparse empty representation and displays a complete readiness report with no passive requests, policy calls, stored credentials or resource writes. **The corrected flow passed the bounded real Sandbox retest on 2026-11-10**, including runtime browser storage and cookie inspection. Real nonempty/multi-page/default-created locationTypes remain unverified. Registration remained incomplete and enrollment absent; this correction changes no seller setting.
 
 ### Policy availability and independent location reads
 
@@ -82,9 +82,9 @@ Responses are capped at 1 MiB decoded per request and 8 MiB per inspection, 15 s
 
 Fake-provider, component, PostgreSQL and Chromium tests cover scope/state upgrades and preservation, foreign ownership, stale versions, no provider I/O in transactions, exact methods/scopes, empty/malformed data, paging, HTTP failures, privacy and zero passive traffic. CI uses only disposable local credentials and fixtures.
 
-Before further real acceptance: review the corrected draft PR and approve the bounded procedure below. The earlier real run verified the read-only grant/identity, then observed incomplete registration and no opted-in programs; a separately approved diagnostic confirmed policy eligibility rejection. A later authorized run verified normal refresh, unchanged GetUser identity, policy skipping and one location HTTP 200, but the old parser rejected its empty response without pagination metadata. That evidence does not establish successful delivery of the corrected complete report, nonempty location shapes or runtime browser storage/cookie behavior. Two-owner automated isolation is not represented as real two-owner consent evidence. Preserve the original Reverb ciphertext and separate missing-key recovery task.
+Every further real acceptance run requires separate approval of the bounded procedure below. The earlier real run verified the read-only grant/identity, then observed incomplete registration and no opted-in programs; a separately approved diagnostic confirmed policy eligibility rejection. A later authorized run verified normal refresh, unchanged GetUser identity, policy skipping and one location HTTP 200, but the old parser rejected its empty response without pagination metadata. The final retest below verifies corrected complete-report delivery and runtime browser privacy; it does not establish nonempty location or enrolled-policy behavior. Two-owner automated isolation is not represented as real two-owner consent evidence. Preserve the original Reverb ciphertext and separate missing-key recovery task.
 
-### Proposed next bounded read-only acceptance — requires separate approval
+### Bounded read-only acceptance procedure — separate approval for each run
 
 1. **Preflight, no provider calls:** verify reviewed head/green CI, ignored owner-only environment, existing migrations, trusted HTTPS on 127.0.0.1 only and the real GitHub owner session. Require the existing verified Sandbox connection with the exact read-only grant and an access token valid for at least two more minutes. Compare safe encrypted-row/version evidence without printing identifiers or envelopes. If disconnected, expired, near expiry or otherwise unusable, stop: no reconsent, authorization-code exchange, expiry adjustment or automatic refresh is included. One normal refresh plus its one GetUser may run before inspection only under separate explicit approval, adding at most two calls (fourteen overall including the twelve-GET ceiling). Recheck the same seller, grant, encrypted persistence and version after any approved refresh. If no suitable owned listing exists, ask separately before creating/removing a local-only fixture.
 2. **Passive behavior:** open/reload settings and the owned listing page. A safe method/path counter must show zero eBay requests. No Connect/Reconnect or metadata action. Install only temporary diagnostic guards, outside source, that permit the next step's fixed GETs and block token/identity/policy or other requests without revealing headers or bodies.
@@ -94,5 +94,27 @@ Before further real acceptance: review the corrected draft PR and approve the bo
 6. **Stop and cleanup:** stop on unexpected auth/scope/identity, TLS/session, HTTP/schema, pagination, rate-limit or timeout behavior. No extra diagnostic, second inspection or automatic refresh. Keep the intended connection and infrastructure. Remove any separately approved local fixture, temporary diagnostics and test-only app process; preserve credentials, Reverb ciphertext and all workspace files. Record actual outcomes separately from untested branches. No enrollment, policy/location/media/inventory/offer/listing mutation, Production access, tunnel, application deployment or merge.
 
 The prior 34-call consent/refresh procedure was stopped and is not permission to resume. Refresh and any additional endpoint/consent testing require their own reviewed approval. Seller enrollment is needed for later business-policy use, but is not required merely to inspect independent locations; no enrollment is performed by this slice. Missing publish-only prerequisites are not treated as an automatic sparse unpublished-offer prohibition.
+
+### Real Sandbox acceptance — 2026-11-10
+
+The owner separately approved one normal refresh/GetUser if needed, one disposable local-only listing and one readiness inspection, with a fourteen-request ceiling. The application ran only at trusted `https://127.0.0.1:3000`, bound to loopback. All eight migrations were applied. Real GitHub sign-in and protected application access succeeded.
+
+At source head `ef957773ee37dc61a42560c858d8eca3307169e9`, **five requests total** returned HTTP 200:
+
+| Operation | Count | Observation |
+| --- | ---: | --- |
+| Normal token refresh | 1 | Same recorded three read-only scopes retained; no replacement refresh token or scope field returned. |
+| Trading GetUser | 1 | Same verified seller identity after refresh. |
+| Seller privileges | 1 | Registration incomplete. |
+| Opted-in programs | 1 | Empty array; business policies not enrolled. |
+| First inventory-location page | 1 | Explicit empty array; total/offset/limit and continuation absent. |
+
+One readiness click produced the complete report: `policies.state=not-enrolled`, no policy collections, zero locations, Inventory write eligibility unverified and all staging/offer/publish flags false. **Zero policy GETs, retries, consent/code exchanges or resource writes.** Visiting and reloading settings, listing details and preparation made zero eBay requests. Missing pagination metadata was not invented.
+
+Native Chromium inspection after the real action found zero localStorage keys, zero sessionStorage keys and zero JavaScript-readable cookies. The actual Better Auth session cookie was Secure, HttpOnly, SameSite=Lax and scoped to the loopback host. Scanned application responses contained no token/envelope or signed-URL markers. Credential-value checks found no private credential matches in tracked files, application logs or temporary diagnostics; application callback-query logging remained absent. Before/after PostgreSQL observations around all five network calls found zero other active client transactions, consistent with reviewed transaction boundaries; these snapshots were not continuous monitoring.
+
+After refresh, the owner/seller/connection version, encrypted credentials and OAuth-state history remained unchanged through readiness and cleanup. The existing refresh envelope and expiry were retained. The synthetic listing was created and deleted through normal UI; database checks confirmed no listing, image, upload or publication residue. No photos or Blob objects were created. The temporary app session was signed out, its tab and HTTPS process closed, and diagnostics removed. Local credentials, Reverb records, original workspace file and protected branches were preserved.
+
+**Coverage limits:** no enrolled-policy collection or actual nonempty/multi-page/default-created `locationTypes` was available; those remain real-provider coverage gaps with separate synthetic tests. No real cross-owner OAuth or concurrent race was exercised in this run. No Inventory write eligibility, enrollment or publishing capability is established. Stage 9B remains in progress; this acceptance does not authorize the next implementation slice or a merge.
 
 The next slices remain [plans for EPS and guarded inventory staging](ebay-next-slices.md), not implemented capabilities.
