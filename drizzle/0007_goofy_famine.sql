@@ -1,0 +1,1 @@
+ALTER TABLE "ebay_oauth_states" ADD COLUMN "requested_scopes" text[] DEFAULT ARRAY['https://api.ebay.com/oauth/api_scope']::text[] NOT NULL;

@@ -1,6 +1,6 @@
 # Read-only eBay Sandbox preparation
 
-This first Stage 9B slice prepares a review from an owned canonical listing. It does **not** upload photos, create inventory items/offers, publish, update or delete any eBay resource. No new tables, migrations or seller OAuth permissions are added. Stage 9B remains in progress.
+This first Stage 9B slice prepares a review from an owned canonical listing. It does **not** upload photos, create inventory items/offers, publish, update or delete any eBay resource. The metadata slice itself adds no tables or seller OAuth permissions. The separate [seller-readiness slice](ebay-seller-readiness.md) adds an opt-in read-only profile and one OAuth-state migration. Stage 9B remains in progress.
 
 ## Explicit provider reads
 
@@ -55,11 +55,11 @@ The real parser and cache were exercised against the exact responses retained on
 
 ## Remaining Stage 9B work
 
-- Read-only seller location, policy enrollment and business-policy readiness checks with a reviewed least-privilege scope expansion.
+- [Seller location/policy readiness](ebay-seller-readiness.md) is implemented with fake-provider validation; real read-only consent/endpoint acceptance remains separately pending.
 - A private-image export boundary and EPS transfer, including byte validation, retention and residual-copy limitations. Reverb's signed-URL ingestion architecture is not reused as an assumed EPS contract.
 - Explicit Sandbox inventory staging with conservative SKU reconciliation, concurrency fencing and minimum safe cleanup. Inventory PUT replacement can affect associated offers; write safety must be reviewed first.
 - Focused fake-provider coverage, followed by a separately approved real Sandbox plan specifying exact test resources and cleanup.
 
-No real inventory, offer, EPS/media, policy, location or listing mutation is authorized by this slice. There is no background sync, live seller support or public application deployment.
+See the [separate future EPS and Inventory plans](ebay-next-slices.md) for ownership, uncertainty, cleanup and acceptance gates. No real inventory, offer, EPS/media, policy, location or listing mutation is authorized by this slice. There is no background sync, live seller support or public application deployment.
 
 Official contracts: [Taxonomy](https://developer.ebay.com/api-docs/commerce/taxonomy/overview.html), [Metadata](https://developer.ebay.com/api-docs/sell/metadata/overview.html), [application-token grant](https://developer.ebay.com/api-docs/static/oauth-client-credentials-grant.html), [condition IDs and Inventory enums](https://www.developer.ebay.com/api-docs/sell/static/metadata/condition-id-values.html).

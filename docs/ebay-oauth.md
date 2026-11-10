@@ -31,7 +31,7 @@ Set these only in ignored, owner-readable server configuration; never print valu
 
 The registered HTTPS routes are `/api/integrations/ebay/callback` and `/api/integrations/ebay/declined`. The app does not modify portal settings or the separately published privacy policy. Production/Vercel runtime configuration and other app origins fail closed for this local-only slice.
 
-Only `https://api.ebay.com/oauth/api_scope` is requested: the base user scope for read-only Trading GetUser. Inventory, account-write, orders, payouts and marketing scopes are not requested. Later features need a reviewed permission expansion. An omitted token-response scope retains the originally requested permissions; explicit missing/expanded permissions are rejected.
+Default connection requests only `https://api.ebay.com/oauth/api_scope` for read-only Trading GetUser. The optional [seller-readiness profile](ebay-seller-readiness.md) adds only `sell.account.readonly` and `sell.inventory.readonly` through explicit reauthorization; existing grants remain intact until it succeeds. Account/inventory write, orders, payouts and marketing permissions are not requested. Requested scopes are bound to one-use state; refresh cannot expand a recorded grant. An omitted token-response scope retains the corresponding requested/recorded profile; explicit missing or unexpected permissions fail closed.
 
 ## Boundaries and database
 
@@ -93,6 +93,6 @@ The following runbook is retained for future retesting, which requires **separat
 
 Real operations are limited to Sandbox consent, authorization-code exchange, read-only authenticated GetUser and token refresh. Make **no inventory/offer/media/location/policy/listing writes**, no live calls and no deployment. Unexpected identity, TLS/callback, session, scope or token behavior stops the procedure; do not weaken verification to continue.
 
-No public app deployment, live seller support, background refresh, remote revocation endpoint or Inventory eligibility claim is included. The subsequent [read-only Stage 9B preparation slice](ebay-preparation.md) does not expand seller OAuth scopes or add resource writes.
+No public app deployment, live seller support, background refresh, remote revocation endpoint or Inventory eligibility claim is included. The [metadata preparation slice](ebay-preparation.md) uses a separate base-scope application token. [Seller readiness](ebay-seller-readiness.md) adds an optional, explicitly requested read-only seller profile; neither slice adds resource writes.
 
 Official references: [OAuth grant](https://developer.ebay.com/api-docs/static/oauth-authorization-code-grant.html), [refresh](https://developer.ebay.com/api-docs/static/oauth-refresh-token-request.html), [Commerce Identity](https://developer.ebay.com/api-docs/commerce/identity/overview.html), [GetUser](https://developer.ebay.com/devzone/xml/docs/reference/ebay/GetUser.html), [UserType](https://developer.ebay.com/devzone/xml/docs/reference/ebay/types/UserType.html).
