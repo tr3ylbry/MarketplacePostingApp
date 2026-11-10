@@ -46,3 +46,17 @@ it("rejects expired or excessive provider expiry without contacting Blob", async
 it("deletes only the supplied trusted storage identifier using server authentication", async () => {
   await storage.deleteObject(upload.pathname); expect(del).toHaveBeenCalledWith(upload.pathname, expect.objectContaining({ abortSignal: expect.anything() }));
 });
+it("reads private bytes through the SDK with cancellation and no signed capability", async () => {
+  const source = { kind: "vercel-blob" as const, pathname: upload.pathname, originalFilename: upload.filename, contentType: "image/png" as const, size: 12, uploadedAt: new Date().toISOString() };
+  vi.mocked(get).mockResolvedValue({ statusCode: 200, stream: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(12)); c.close(); } }), headers: new Headers(),
+    blob: { pathname: source.pathname, size: 12, contentType: source.contentType, uploadedAt: new Date(), url: "https://private.example/object", downloadUrl: "https://private.example/object", contentDisposition: "inline", cacheControl: "private", etag: "etag" } });
+  const signal = AbortSignal.timeout(1000); expect((await storage.readPrivateImage(source, signal)).length).toBe(12);
+  expect(get).toHaveBeenCalledWith(source.pathname, { access: "private", useCache: false, abortSignal: signal });
+  expect(issueSignedToken).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
+});
+it("rejects missing private objects and malformed trusted pathnames without signing", async () => {
+  const source = { kind: "vercel-blob" as const, pathname: upload.pathname, originalFilename: upload.filename, contentType: "image/png" as const, size: 12, uploadedAt: new Date().toISOString() };
+  vi.mocked(get).mockResolvedValue(null); await expect(storage.readPrivateImage(source, AbortSignal.timeout(1000))).rejects.toThrow();
+  vi.mocked(get).mockClear(); await expect(storage.readPrivateImage({ ...source, pathname: "https://attacker.invalid/object" }, AbortSignal.timeout(1000))).rejects.toThrow();
+  expect(get).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
+});

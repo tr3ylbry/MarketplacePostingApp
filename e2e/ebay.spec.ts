@@ -199,7 +199,8 @@ test("unenrolled seller accepts sparse empty locations, skips policies, and pres
     await expect(page.getByLabel("Fulfillment policy", { exact: true })).toHaveValue("");
     for (const kind of ["Fulfillment", "Payment", "Return"]) await expect(page.getByLabel(kind + " policy", { exact: true })).toBeDisabled();
     await expect(page.getByText(/No existing non-motor EBAY_US policy/)).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /create.*offer|stage.*inventory|publish|upload/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /create.*offer|stage.*inventory|publish/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Upload to eBay — unavailable", exact: true })).toBeDisabled();
     const checked = await stats();
     expect(checked.readinessReads - authorized.readinessReads).toBe(3);
     expect(checked.exchanges).toBe(authorized.exchanges); expect(checked.refreshes).toBe(authorized.refreshes); expect(checked.mutations).toBe(0);
@@ -207,4 +208,52 @@ test("unenrolled seller accepts sparse empty locations, skips policies, and pres
     expect(await page.evaluate(() => ({ local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length, cookies: document.cookie }))).toEqual({ local: 0, session: 0, cookies: "" });
     await page.reload(); expect(await stats()).toEqual(checked);
   } finally { await repository.delete(owner, listing.id); }
+});
+
+test("private-photo preparation validates explicit bytes, retains source, and never uploads to eBay", async ({ page, request }) => {
+  const stats = async () => (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
+  const storageReads = async () => (await request.post("http://127.0.0.1:4311/control/stats", {
+    headers: { Authorization: `Bearer ${process.env.TEST_STORAGE_SECRET}` }, data: {},
+  })).json();
+  await page.route("https://auth.sandbox.ebay.com/oauth2/authorize?**", async route => {
+    const url = new URL(route.request().url());
+    await route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:3100/api/integrations/ebay/callback?state=${url.searchParams.get("state")}&code=seller-a` }, body: "" });
+  });
+  await page.goto("/settings/integrations/ebay"); await page.getByRole("button", { name: "Connect eBay Sandbox", exact: true }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  const { listingFixture } = await import("../src/test/fixtures"), { DrizzleListingRepository } = await import("../src/infrastructure/repositories/drizzleListingRepository");
+  const { drizzle } = await import("drizzle-orm/node-postgres"), schema = await import("../src/infrastructure/db/schema"), sharp = (await import("sharp")).default;
+  const repository = new DrizzleListingRepository(drizzle(pool, { schema })), listing = await repository.create(owner, listingFixture());
+  let pathname: string | undefined;
+  try {
+    const pixels = await sharp({ create: { width: 500, height: 600, channels: 3, background: "#446688" } }).png().toBuffer();
+    await page.goto(`/listings/${listing.id}/edit`); await expect(page.getByLabel("Upload photos")).toBeEnabled();
+    await page.getByLabel("Upload photos").setInputFiles({ name: "private-preparation.png", mimeType: "image/png", buffer: pixels });
+    await expect(page.getByRole("img", { name: "private-preparation.png", exact: true })).toBeVisible();
+    await expect(page.getByText("Uploading", { exact: false })).toHaveCount(0);
+    const row = (await pool.query("SELECT pathname FROM listing_images WHERE listing_id=$1", [listing.id])).rows[0]; pathname = row.pathname;
+    const providerBefore = await stats(), storageBefore = await storageReads();
+    const bodies: string[] = []; page.on("response", response => { if (new URL(response.url()).pathname === `/listings/${listing.id}/ebay`) void response.text().then(body => bodies.push(body)).catch(() => undefined); });
+    await page.goto(`/listings/${listing.id}/ebay`); await page.reload();
+    await expect(page.getByRole("button", { name: "Validate photo 1", exact: true })).toBeEnabled();
+    expect(await stats()).toEqual(providerBefore); expect(await storageReads()).toEqual(storageBefore);
+    await page.getByRole("button", { name: "Validate photo 1", exact: true }).click();
+    await expect(page.getByText(/Photo verified for local export review/)).toContainText("500 × 600");
+    await expect(page.getByRole("button", { name: "Upload to eBay — unavailable", exact: true })).toBeDisabled();
+    expect((await storageReads()).privateReads - storageBefore.privateReads).toBe(1); expect(await stats()).toEqual(providerBefore);
+    expect(bodies.join(" ")).not.toMatch(/fake-access|fake-refresh|ciphertext|authTag|images\/|object\/|pathname|Bearer/);
+    expect(await page.evaluate(() => ({ local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length, cookies: document.cookie }))).toEqual({ local: 0, session: 0, cookies: "" });
+    expect((await pool.query("SELECT provider_retain_until > now() AS retained FROM listing_images WHERE listing_id=$1", [listing.id])).rows[0].retained).toBe(true);
+    const readAfter = await storageReads();
+    await page.goto(`/listings/${listing.id}/edit`); await page.getByLabel("Title", { exact: false }).first().fill("Private photo local save fixture");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click(); await expect(page.getByRole("status").filter({ hasText: "Saved!" })).toBeVisible();
+    expect(await storageReads()).toEqual(readAfter); expect(await stats()).toEqual(providerBefore);
+    await page.goto(`/listings/${listing.id}/ebay`); expect(await storageReads()).toEqual(readAfter);
+    await expect(page.getByText(/Photo verified for local export review/)).toHaveCount(0);
+    expect((await pool.query("SELECT count(*)::integer n FROM marketplace_listings WHERE listing_id=$1", [listing.id])).rows[0].n).toBe(0);
+  } finally {
+    await repository.delete(owner, listing.id);
+    // Test-only teardown: no real Blob object or provider resource exists.
+    if (pathname) await pool.query("DELETE FROM image_cleanup WHERE pathname=$1", [pathname]);
+  }
 });
