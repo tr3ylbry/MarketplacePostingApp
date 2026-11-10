@@ -207,3 +207,39 @@ it("rejects a stale access-token context before any independent reads", async ()
   await expect(createEbayReadinessService(listings, repo, staleAccess, gateway, () => now).check(owner, listing.id, listing.updatedAt)).rejects.toMatchObject({ code: "stale" });
   expect(gateway.inspect).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled(); expect(await repo.connection(owner)).toEqual(row);
 });
+function observedEmptyReadinessGateway() {
+  const calls = vi.fn<typeof fetch>(async input => {
+    expect(txContext.getStore()).not.toBe(true);
+    const url = new URL(String(input));
+    return Response.json(readinessFixture(url.pathname, url.searchParams, true));
+  });
+  return { calls, inspect: (token: string) => new EbayReadinessClient(calls).inspect(token) };
+}
+it("completes the observed sparse empty-location response without policies, writes or fabricated paging evidence", async () => {
+  await consent("readiness"); const before = await repo.connection(owner), empty = observedEmptyReadinessGateway();
+  vi.clearAllMocks();
+  const result = await createEbayReadinessService(listings, repo, authorization(), empty, () => now).check(owner, listing.id, listing.updatedAt);
+  expect(result).toMatchObject({ registrationComplete: false, businessPoliciesEnrolled: false, policies: { state: "not-enrolled" }, locations: [], inventoryEligibility: "unverified", canStage: false, canCreateOffer: false, canPublish: false });
+  expect(result).not.toHaveProperty("total"); expect(result).not.toHaveProperty("offset"); expect(result).not.toHaveProperty("limit");
+  expect(empty.calls).toHaveBeenCalledTimes(3);
+  expect(empty.calls.mock.calls.every(([u, init]) => new URL(String(u)).origin === "https://api.sandbox.ebay.com" && init?.method === "GET" && !String(u).includes("_policy"))).toBe(true);
+  expect(JSON.stringify(result)).not.toMatch(/fixture-access|fixture-refresh|private-|ciphertext|authTag|addressLine|postalCode|https?:/);
+  expect(await repo.connection(owner)).toEqual(before); expect(await listings.getById(owner, listing.id)).toEqual(listing);
+  expect(oauth.refresh).not.toHaveBeenCalled(); expect(oauth.exchange).not.toHaveBeenCalled();
+});
+it.each(["edit", "disconnect", "reconnect"])("discards a sparse empty report after %s, retaining owner/version fencing", async change => {
+  await consent("readiness"); const empty = observedEmptyReadinessGateway();
+  const gateway = { inspect: async (token: string) => {
+    const result = await empty.inspect(token);
+    if (change === "edit") await listings.update(owner, { ...listing, title: "Updated during empty read", updatedAt: new Date(Date.parse(listing.updatedAt) + 1000).toISOString() }, listing.updatedAt);
+    if (change === "disconnect") await authorization().disconnect(owner);
+    if (change === "reconnect") await consent("readiness");
+    return result;
+  } };
+  await expect(createEbayReadinessService(listings, repo, authorization(), gateway, () => now).check(owner, listing.id, listing.updatedAt)).rejects.toMatchObject({ code: "stale" });
+});
+it("denies a foreign owner before the sparse empty-location gateway is called", async () => {
+  await consent("readiness"); const empty = observedEmptyReadinessGateway();
+  await expect(createEbayReadinessService(listings, repo, authorization(), empty, () => now).check(other, listing.id, listing.updatedAt)).rejects.toThrow();
+  expect(empty.calls).not.toHaveBeenCalled();
+});

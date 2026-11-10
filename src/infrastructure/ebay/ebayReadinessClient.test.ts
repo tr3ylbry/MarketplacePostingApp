@@ -24,6 +24,86 @@ it("reports empty existing settings and incomplete registration without inventin
   const result = await new EbayReadinessClient(transport(true)).inspect("fixture-access");
   expect(result).toMatchObject({ registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false, policies: { state: "not-enrolled" }, locations: [] });
 });
+it.each(Array.from({ length: 8 }, (_, mask) => mask))("accepts verified empty first-page metadata combination %i without inventing fields", async mask => {
+  const base = transport(true), body: Record<string, unknown> = { locations: [] };
+  if (mask & 1) body.total = 0;
+  if (mask & 2) body.offset = 0;
+  if (mask & 4) body.limit = 100;
+  const fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("/location") ? Promise.resolve(json(body)) : base(input, init));
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result).toEqual({ registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false, policies: { state: "not-enrolled" }, locations: [] });
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(fetch.mock.calls.map(([u]) => new URL(String(u)).pathname)).toEqual([
+    "/sell/account/v1/privilege", "/sell/account/v1/program/get_opted_in_programs", "/sell/inventory/v1/location",
+  ]);
+  expect(Object.fromEntries(new URL(String(fetch.mock.calls[2][0])).searchParams)).toEqual({ limit: "100", offset: "0" });
+  expect(result).not.toHaveProperty("total"); expect(result).not.toHaveProperty("offset"); expect(result).not.toHaveProperty("limit");
+});
+it("discards a bounded current-page href rather than following, persisting or returning it", async () => {
+  const base = transport(true), href = "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=0";
+  const fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("/location") ? Promise.resolve(json({ locations: [], total: 0, offset: 0, limit: 100, href })) : base(input, init));
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.locations).toEqual([]); expect(fetch).toHaveBeenCalledTimes(3);
+  expect(JSON.stringify(result)).not.toContain(href);
+});
+it.each([
+  { total: 1 }, { total: -1 }, { total: "0" }, { total: null },
+  { offset: 1 }, { offset: -1 }, { offset: "0" }, { offset: null },
+  { limit: 0 }, { limit: 99 }, { limit: 101 }, { limit: "100" }, { limit: null },
+  { next: "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=1" },
+  { next: "https://api.ebay.com/sell/inventory/v1/location?limit=100&offset=1" },
+  { next: "" }, { next: null }, { prev: "https://api.sandbox.ebay.com/sell/inventory/v1/location" },
+  { continuation: "private-fixture" }, { continuationToken: "private-fixture" }, { hasMore: true },
+  { links: { next: "https://example.test/private-fixture" } }, { errors: [] },
+])("rejects contradictory or unexpected empty-first-page metadata: %#", async change => {
+  const base = transport(true), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("/location") ? Promise.resolve(json({ locations: [], ...change })) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each([undefined, null, {}, "", [null], [{}], ["invalid"]])("does not infer an empty collection from missing/malformed locations: %j", async locations => {
+  const base = transport(true), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("/location") ? Promise.resolve(json({ total: 0, offset: 0, limit: 100, locations })) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each(["total", "offset", "limit"])("still requires %s for a nonempty location page", async field => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init); if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); delete body[field]; return json(body);
+  };
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+});
+it.each([{}, { total: 2, offset: 1, limit: 100 }, { total: 0, offset: 1, limit: 100 }])("rejects an empty later page while pagination is incomplete: %#", async metadata => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>((input, init) => {
+    const url = new URL(String(input));if (!url.pathname.endsWith("/location")) return base(input, init);
+    if (url.searchParams.get("offset") === "1") return Promise.resolve(json({ locations: [], ...metadata }));
+    const fixture = readinessFixture(url.pathname, url.searchParams) as { locations: object[] };
+    return Promise.resolve(json({ total: 2, offset: 0, limit: 100, locations: [fixture.locations[0]], next: "https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=1" }));
+  });
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(7);
+});
+it.each(["STORE", "FULFILLMENT_CENTER", "PROVIDER_FUTURE_TYPE"])("keeps a nonempty %s location visible as an unsupported warehouse type", async type => {
+  const base = transport();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const response = await base(input, init); if (!new URL(String(input)).pathname.endsWith("/location")) return response;
+    const body = await response.json(); body.locations[0].locationTypes = [type]; return json(body);
+  };
+  expect((await new EbayReadinessClient(fetch).inspect("fixture-access")).locations[0]).toMatchObject({ enabled: true, warehouse: false, addressComplete: true });
+});
+it.each([400, 401, 403, 429, 500, 202, 206])("never treats location HTTP %i as a completed empty page", async status => {
+  const base = transport(true), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("/location") ? Promise.resolve(json({ locations: [] }, status)) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toBeInstanceOf(Error);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each(["oversize", "json"])("retains the %s response safeguard before accepting an empty page", async kind => {
+  const base = transport(true), fetch = vi.fn<typeof globalThis.fetch>((input, init) => {
+    if (!new URL(String(input)).pathname.endsWith("/location")) return base(input, init);
+    return Promise.resolve(kind === "oversize" ? json({ locations: [], padding: "x".repeat(1024 * 1024) }) : new Response('{"locations":[]', { headers: { "Content-Type": "application/json" } }));
+  });
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.not.toThrow(/fixture-access|padding/);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
 it("skips all policy requests when programs are empty but still inspects existing locations", async () => {
   const base = transport(), fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => new URL(String(input)).pathname.endsWith("get_opted_in_programs") ? json({ programs: [] }) : base(input, init));
   const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
@@ -167,7 +247,7 @@ it.each(["", "   ", "key<markup>", "key\ncontrol", "key\0control"])("keeps rejec
   };
   await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
 });
-it.each([undefined, null, []])("does not infer a warehouse from absent or invalid GET locationTypes: %j", async types => {
+it.each([undefined, null, [], {}, [123], [null], [""]])("does not infer a warehouse from absent or invalid GET locationTypes: %j", async types => {
   const base = transport();
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const response = await base(input, init);

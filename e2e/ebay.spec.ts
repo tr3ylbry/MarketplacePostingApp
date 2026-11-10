@@ -163,7 +163,7 @@ test("explicit read-only permission upgrade and seller checks; no passive calls,
   } finally { await repository.delete(owner, listing.id); }
 });
 
-test("unenrolled seller skips policies, checks locations independently, and preserves browser privacy", async ({ page, request }) => {
+test("unenrolled seller accepts sparse empty locations, skips policies, and preserves browser privacy", async ({ page, request }) => {
   const stats = async () => await (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
   let upgrade = false;
   await page.route("https://auth.sandbox.ebay.com/oauth2/authorize?**", async route => {
@@ -189,6 +189,9 @@ test("unenrolled seller skips policies, checks locations independently, and pres
     await expect(page.getByRole("button", { name: "Check eBay Seller Readiness" })).toBeEnabled();
     expect(await stats()).toEqual(authorized);
     await page.getByRole("button", { name: "Check eBay Seller Readiness" }).click();
+    const report = page.getByRole("region", { name: "Seller readiness result" });
+    await expect(report).toBeVisible();
+    await expect(report.getByRole("alert")).toHaveCount(0);
     await expect(page.getByText(/Incomplete — finish seller registration/)).toBeVisible();
     await expect(page.getByText(/Not enrolled — manage business policies/)).toBeVisible();
     await expect(page.getByText(/Business policies are unavailable because/)).toBeVisible();

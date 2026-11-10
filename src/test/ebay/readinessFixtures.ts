@@ -8,7 +8,9 @@ export function readinessFixture(path: string, query: URLSearchParams, missing =
         marketplaceId: "EBAY_US", categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }], description: "private-fixture" }],
     };
   }
-  if (path === "/sell/inventory/v1/location") return { total: missing ? 0 : 2, limit: 100, offset: 0, locations: missing ? [] : ["ENABLED", "DISABLED"].map((merchantLocationStatus, i) => ({
+  // Observed real Sandbox empty response: explicit array, no paging metadata.
+  if (path === "/sell/inventory/v1/location" && missing) return { locations: [] };
+  if (path === "/sell/inventory/v1/location") return { total: 2, limit: 100, offset: 0, locations: ["ENABLED", "DISABLED"].map((merchantLocationStatus, i) => ({
     merchantLocationKey: "fixture-warehouse-" + i, merchantLocationStatus, name: "Fixture warehouse", locationTypes: ["WAREHOUSE"],
     location: { address: { country: "US", postalCode: "00000", addressLine1: "private-fixture" } }, phone: "private-fixture",
   })) };

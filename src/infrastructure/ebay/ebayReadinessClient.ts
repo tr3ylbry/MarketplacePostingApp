@@ -18,6 +18,14 @@ const locationPage = z.object({
   locations: z.array(location).max(100), total: z.number().int().min(0).max(1000),
   offset: z.number().int().nonnegative(), limit: z.number().int().positive().max(100), next: z.string().max(2048).optional(),
 });
+const emptyLocations = z.object({ locations: z.tuple([]) });
+// Real Sandbox empty first pages can omit pagination metadata. Accept only an
+// explicit empty array, never missing/malformed locations or a continuation.
+// Optional current-page href is bounded and discarded, never followed.
+const emptyLocationPage = z.strictObject({
+  locations: z.tuple([]), total: z.literal(0).optional(), offset: z.literal(0).optional(),
+  limit: z.literal(100).optional(), href: text(2048).optional(),
+});
 type AccountPath = "/sell/account/v1/privilege" | "/sell/account/v1/program/get_opted_in_programs" | `/sell/account/v1/${EbayPolicyKind}_policy`;
 type ReadPath = AccountPath | "/sell/inventory/v1/location";
 const policyErrorEnvelope = z.object({ errors: z.array(z.object({
@@ -50,7 +58,7 @@ export class EbayReadinessClient implements EbayReadinessGateway {
           headers: { Authorization: "Bearer " + accessToken, Accept: "application/json", "Content-Language": "en-US", "Accept-Encoding": "gzip" } });
         signal.throwIfAborted();
         const policyRejection = response.status === 400 && ["/sell/account/v1/fulfillment_policy", "/sell/account/v1/payment_policy", "/sell/account/v1/return_policy"].includes(path);
-        if ((!response.ok && !policyRejection) || !/^application\/json\b/i.test(response.headers.get("content-type") ?? "")) {
+        if ((!response.ok && !policyRejection) || (path === "/sell/inventory/v1/location" && response.status !== 200) || !/^application\/json\b/i.test(response.headers.get("content-type") ?? "")) {
           await response.body?.cancel().catch(() => undefined);
           throw new EbayReadinessError(response.status === 401 ? "authorization" : response.status === 403 ? "forbidden" : response.status === 429 ? "rate-limit" : "unavailable");
         }
@@ -113,8 +121,16 @@ export class EbayReadinessClient implements EbayReadinessGateway {
         }
       }
       const locations: EbaySellerReadiness["locations"] = []; let offset = 0, total: number | undefined;
+      const summary = (): EbaySellerReadiness => ({ registrationComplete: seller.sellerRegistrationCompleted, zeroMonthlyQuantityLimit: seller.sellingLimit?.quantity === 0,
+        businessPoliciesEnrolled, policies, locations });
       for (let page = 0; page < 10; page++) {
-        const result = locationPage.parse(await get("/sell/inventory/v1/location", { limit: "100", offset: String(offset) }));
+        const body = await get("/sell/inventory/v1/location", { limit: "100", offset: String(offset) });
+        if (page === 0 && offset === 0 && emptyLocations.safeParse(body).success) {
+          emptyLocationPage.parse(body);
+          // Preserve only the verified collection; do not invent provider totals.
+          return summary();
+        }
+        const result = locationPage.parse(body);
         if (result.offset !== offset || result.limit !== 100 || (total !== undefined && total !== result.total)) throw new EbayReadinessError("malformed");
         total = result.total;
         for (const l of result.locations) {
@@ -126,8 +142,7 @@ export class EbayReadinessClient implements EbayReadinessGateway {
         if (new Set(locations.map(l => l.key)).size !== locations.length || offset > total) throw new EbayReadinessError("malformed");
         if (offset === total) {
           if (result.next) throw new EbayReadinessError("malformed");
-          return { registrationComplete: seller.sellerRegistrationCompleted, zeroMonthlyQuantityLimit: seller.sellingLimit?.quantity === 0,
-            businessPoliciesEnrolled, policies, locations };
+          return summary();
         }
         if (!result.locations.length || !result.next) throw new EbayReadinessError("malformed");
         const next = new URL(result.next);
