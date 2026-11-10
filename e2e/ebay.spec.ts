@@ -163,7 +163,8 @@ test("explicit read-only permission upgrade and seller checks; no passive calls,
   } finally { await repository.delete(owner, listing.id); }
 });
 
-test("missing seller policies and locations are guidance, never invented resources", async ({ page, request }) => {
+test("unenrolled seller skips policies, checks locations independently, and preserves browser privacy", async ({ page, request }) => {
+  const stats = async () => await (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
   let upgrade = false;
   await page.route("https://auth.sandbox.ebay.com/oauth2/authorize?**", async route => {
     const url = new URL(route.request().url());
@@ -181,14 +182,26 @@ test("missing seller policies and locations are guidance, never invented resourc
     upgrade = true;
     await page.getByRole("button", { name: "Authorize read-only seller checks", exact: true }).click();
     await expect(page.getByText("Permissions: Account identity, read-only account settings/business policies and read-only inventory locations.", { exact: true })).toBeVisible();
-    await page.goto(`/listings/${listing.id}/ebay`);
+    const authorized = await stats();
+    const bodies: string[] = [];
+    page.on("response", r => { if (r.url().includes(`/listings/${listing.id}/ebay`)) void r.text().then(t => bodies.push(t)).catch(() => undefined); });
+    await page.goto(`/listings/${listing.id}/ebay`); await page.reload();
+    await expect(page.getByRole("button", { name: "Check eBay Seller Readiness" })).toBeEnabled();
+    expect(await stats()).toEqual(authorized);
     await page.getByRole("button", { name: "Check eBay Seller Readiness" }).click();
     await expect(page.getByText(/Incomplete — finish seller registration/)).toBeVisible();
     await expect(page.getByText(/Not enrolled — manage business policies/)).toBeVisible();
+    await expect(page.getByText(/Business policies are unavailable because/)).toBeVisible();
     await expect(page.getByText(/No usable enabled warehouse/)).toBeVisible();
     await expect(page.getByLabel("Fulfillment policy", { exact: true })).toHaveValue("");
+    for (const kind of ["Fulfillment", "Payment", "Return"]) await expect(page.getByLabel(kind + " policy", { exact: true })).toBeDisabled();
+    await expect(page.getByText(/No existing non-motor EBAY_US policy/)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /create.*offer|stage.*inventory|publish|upload/i })).toHaveCount(0);
-    const stats = await (await request.get("http://127.0.0.1:4313/stats", { headers: { "x-test-secret": process.env.TEST_EBAY_SECRET! } })).json();
-    expect(stats.mutations).toBe(0);
+    const checked = await stats();
+    expect(checked.readinessReads - authorized.readinessReads).toBe(3);
+    expect(checked.exchanges).toBe(authorized.exchanges); expect(checked.refreshes).toBe(authorized.refreshes); expect(checked.mutations).toBe(0);
+    expect(bodies.join(" ")).not.toMatch(/fake-access|fake-refresh|private-fixture|ciphertext|authTag|addressLine|postalCode|longMessage/);
+    expect(await page.evaluate(() => ({ local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length, cookies: document.cookie }))).toEqual({ local: 0, session: 0, cookies: "" });
+    await page.reload(); expect(await stats()).toEqual(checked);
   } finally { await repository.delete(owner, listing.id); }
 });

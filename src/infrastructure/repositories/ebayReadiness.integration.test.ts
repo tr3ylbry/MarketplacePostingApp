@@ -163,3 +163,47 @@ it("rejects an already stale listing before credentials or provider traffic", as
   await consent("readiness");
   await expect(readiness().check(owner, listing.id, "2000-01-01T00:00:00.000Z")).rejects.toThrow(); expect(transport).not.toHaveBeenCalled();
 });
+
+function policyAvailabilityGateway(state: "not-enrolled" | "ineligible" | "unknown-failure") {
+  const calls = vi.fn<typeof fetch>(async input => {
+    expect(txContext.getStore()).not.toBe(true);
+    const url = new URL(String(input));
+    if (state === "not-enrolled" && url.pathname.endsWith("get_opted_in_programs")) return Response.json({ programs: [] });
+    if (state !== "not-enrolled" && url.pathname.endsWith("fulfillment_policy")) return Response.json({ errors: [{ errorId: 20403, domain: "API_ACCOUNT", category: "REQUEST",
+      message: state === "ineligible" ? "User is not eligible for Business Policy" : "private-unexpected-provider-error" }] }, { status: 400 });
+    return Response.json(readinessFixture(url.pathname, url.searchParams));
+  });
+  return { calls, inspect: (token: string) => new EbayReadinessClient(calls).inspect(token) };
+}
+it.each(["not-enrolled", "ineligible", "unknown-failure"] as const)("returns explicit %s policy availability and independent locations without database writes", async state => {
+  await consent("readiness"); const before = await repo.connection(owner), partial = policyAvailabilityGateway(state);
+  vi.clearAllMocks();
+  const result = await createEbayReadinessService(listings, repo, authorization(), partial, () => now).check(owner, listing.id, listing.updatedAt);
+  expect(result.policies).toEqual({ state }); expect(result.policies).not.toHaveProperty("collections"); expect(result.locations).toHaveLength(2);
+  expect(result).toMatchObject({ businessPoliciesEnrolled: state !== "not-enrolled", inventoryEligibility: "unverified", canStage: false, canCreateOffer: false, canPublish: false });
+  expect(partial.calls).toHaveBeenCalledTimes(state === "not-enrolled" ? 3 : 4);
+  expect(partial.calls.mock.calls.every(([u, init]) => new URL(String(u)).origin === "https://api.sandbox.ebay.com" && init?.method === "GET")).toBe(true);
+  expect(JSON.stringify(result)).not.toMatch(/fixture-access|fixture-refresh|private-|ciphertext|authTag|addressLine|postalCode|20403|API_ACCOUNT/);
+  expect(await repo.connection(owner)).toEqual(before); expect(await listings.getById(owner, listing.id)).toEqual(listing);
+  expect(oauth.exchange).not.toHaveBeenCalled(); expect(oauth.refresh).not.toHaveBeenCalled();
+});
+it.each(["not-enrolled", "ineligible", "unknown-failure"] as const)("does not bypass post-read owner/version checks for a %s report", async state => {
+  await consent("readiness"); const partial = policyAvailabilityGateway(state);
+  for (const change of ["edit", "reconnect", "disconnect"]) {
+    const latest = (await listings.getById(owner, listing.id))!;
+    const gateway = { inspect: async (token: string) => {
+      const result = await partial.inspect(token);
+      if (change === "edit") await listings.update(owner, { ...latest, title: "Edited during independent reads", updatedAt: new Date(Date.parse(latest.updatedAt) + 1000).toISOString() }, latest.updatedAt);
+      if (change === "reconnect") await consent("readiness");
+      if (change === "disconnect") await authorization().disconnect(owner);
+      return result;
+    } };
+    await expect(createEbayReadinessService(listings, repo, authorization(), gateway, () => now).check(owner, latest.id, latest.updatedAt)).rejects.toMatchObject({ code: "stale" });
+  }
+});
+it("rejects a stale access-token context before any independent reads", async () => {
+  await consent("readiness"); const row = (await repo.connection(owner))!;
+  const staleAccess = { accessContext: vi.fn(async () => ({ token: "fixture-access", connectionId: row.id, version: "stale-version", sellerId: row.sellerId! })) };
+  await expect(createEbayReadinessService(listings, repo, staleAccess, gateway, () => now).check(owner, listing.id, listing.updatedAt)).rejects.toMatchObject({ code: "stale" });
+  expect(gateway.inspect).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled(); expect(await repo.connection(owner)).toEqual(row);
+});

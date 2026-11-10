@@ -11,11 +11,16 @@ export interface EbayLocationCandidate {
   warehouse: boolean;
   addressComplete: boolean;
 }
+export type EbayPolicyAvailability =
+  | { state: "available"; collections: Record<EbayPolicyKind, EbayPolicyCandidate[]> }
+  | { state: "not-enrolled" }
+  | { state: "ineligible" }
+  | { state: "unknown-failure" };
 export interface EbaySellerReadiness {
   registrationComplete: boolean;
   zeroMonthlyQuantityLimit: boolean;
   businessPoliciesEnrolled: boolean;
-  policies: Record<EbayPolicyKind, EbayPolicyCandidate[]>;
+  policies: EbayPolicyAvailability;
   locations: EbayLocationCandidate[];
 }
 // GETs only. A readiness result is never a capability to stage or publish.

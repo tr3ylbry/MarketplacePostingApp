@@ -46,4 +46,4 @@ Test plan: fake full PUT replacement semantics; pre-existing SKU collision; sell
 
 ## Approval sequence
 
-Review seller-readiness code/CI → separately approve read-only reauthorization and six-endpoint Sandbox acceptance → approve media design/host/limits and fake-provider implementation → separately approve a bounded real image transfer with residual-copy disclosure → approve Inventory ownership/reconciliation/cleanup design and fake implementation → separately authorize exact real staging/cleanup resources. No new implementation branch or provider write is implied by this document.
+Review seller-readiness code/CI → separately approve bounded enrollment-aware Sandbox readiness acceptance (reuse a valid grant, skip policies when not enrolled, inspect locations independently) → approve media design/host/limits and fake-provider implementation → separately approve a bounded real image transfer with residual-copy disclosure → approve Inventory ownership/reconciliation/cleanup design and fake implementation → separately authorize exact real staging/cleanup resources. No new implementation branch or provider write is implied by this document.

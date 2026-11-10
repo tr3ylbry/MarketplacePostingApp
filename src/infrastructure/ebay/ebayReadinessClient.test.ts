@@ -1,6 +1,7 @@
 import { EbayReadinessClient } from "./ebayReadinessClient";
 import { readinessFixture } from "../../test/ebay/readinessFixtures";
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+const eligibilityError = () => ({ errors: [{ errorId: 20403, domain: "API_ACCOUNT", category: "REQUEST", message: "User is not eligible for Business Policy" }] });
 const transport = (missing = false) => vi.fn<typeof fetch>(async (input, init) => {
   const url = new URL(String(input));
   expect(url.origin).toBe("https://api.sandbox.ebay.com");
@@ -21,7 +22,119 @@ it("uses only the six fixed seller-read endpoints and returns a minimal private-
 });
 it("reports empty existing settings and incomplete registration without inventing policies or a location", async () => {
   const result = await new EbayReadinessClient(transport(true)).inspect("fixture-access");
-  expect(result).toMatchObject({ registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false, policies: { fulfillment: [], payment: [], return: [] }, locations: [] });
+  expect(result).toMatchObject({ registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false, policies: { state: "not-enrolled" }, locations: [] });
+});
+it("skips all policy requests when programs are empty but still inspects existing locations", async () => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => new URL(String(input)).pathname.endsWith("get_opted_in_programs") ? json({ programs: [] }) : base(input, init));
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.policies).toEqual({ state: "not-enrolled" });
+  expect(result.policies).not.toHaveProperty("collections");
+  expect(result.businessPoliciesEnrolled).toBe(false); expect(result.locations).toHaveLength(2);
+  expect(fetch.mock.calls.map(([u]) => new URL(String(u)).pathname)).toEqual([
+    "/sell/account/v1/privilege", "/sell/account/v1/program/get_opted_in_programs", "/sell/inventory/v1/location",
+  ]);
+});
+it("accepts complete, genuinely empty policy collections for an enrolled seller", async () => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(String(input)), kind = ["fulfillment", "payment", "return"].find(k => url.pathname.endsWith(k + "_policy"));
+    return kind ? json({ total: 0, [kind + "Policies"]: [] }) : base(input, init);
+  });
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.policies).toEqual({ state: "available", collections: { fulfillment: [], payment: [], return: [] } });
+  expect(fetch).toHaveBeenCalledTimes(6);
+});
+it.each(["fulfillment", "payment", "return"])("recognizes the verified %s eligibility rejection, discards partial collections and reads locations", async kind => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => new URL(String(input)).pathname.endsWith(kind + "_policy") ? json(eligibilityError(), 400) : base(input, init));
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.businessPoliciesEnrolled).toBe(true); expect(result.policies).toEqual({ state: "ineligible" });
+  expect(result.locations).toHaveLength(2);
+  const paths = fetch.mock.calls.map(([u]) => new URL(String(u)).pathname);
+  expect(paths[paths.length - 1]).toBe("/sell/inventory/v1/location");
+  expect(paths.filter(p => p.endsWith("_policy"))).toHaveLength(["fulfillment", "payment", "return"].indexOf(kind) + 1);
+  expect(JSON.stringify(result)).not.toMatch(/Business Policy|API_ACCOUNT|20403|fixture-access|private-fixture/);
+});
+it("can recognize the known eligibility template in longMessage while discarding unrelated provider fields", async () => {
+  const base = transport(), body = { errors: [{ errorId: 20403, domain: "API_ACCOUNT", category: "REQUEST", message: "private-provider-message", longMessage: "User is not eligible for Business Policy.", parameters: [{ name: "private-parameter", value: "private-fixture" }] }], account: "private-fixture" };
+  const fetch: typeof globalThis.fetch = (input, init) => new URL(String(input)).pathname.endsWith("fulfillment_policy") ? Promise.resolve(json(body, 400)) : base(input, init);
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.policies).toEqual({ state: "ineligible" });
+  expect(JSON.stringify(result)).not.toMatch(/private-|longMessage|parameters|20403|API_ACCOUNT/);
+});
+it.each([
+  { errorId: 20402 }, { domain: "API_INVENTORY" }, { category: "APPLICATION" },
+  { message: "Invalid marketplaceId" }, { message: undefined },
+])("does not reinterpret an unrelated policy 400 as eligibility or empty policies: %o", async change => {
+  const base = transport(), body = eligibilityError(); Object.assign(body.errors[0], change);
+  const fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("fulfillment_policy") ? Promise.resolve(json(body, 400)) : base(input, init));
+  const result = await new EbayReadinessClient(fetch).inspect("fixture-access");
+  expect(result.policies).toEqual({ state: "unknown-failure" });
+  expect(result.policies).not.toHaveProperty("collections"); expect(result.locations).toHaveLength(2);
+  expect(fetch).toHaveBeenCalledTimes(4); // No remaining policy requests or retries.
+});
+it("does not hide an additional unknown error behind a recognized eligibility entry", async () => {
+  const base = transport(), body = eligibilityError(); body.errors.push({ ...body.errors[0], errorId: 20415, message: "private-provider-message" });
+  const fetch: typeof globalThis.fetch = (input, init) => new URL(String(input)).pathname.endsWith("fulfillment_policy") ? Promise.resolve(json(body, 400)) : base(input, init);
+  expect((await new EbayReadinessClient(fetch).inspect("fixture-access")).policies).toEqual({ state: "unknown-failure" });
+});
+it.each([
+  {}, { errors: null }, { errors: [] }, { errors: [null] },
+  { errors: [{ errorId: "20403", domain: "API_ACCOUNT", category: "REQUEST" }] },
+  { errors: [{ errorId: 20403.5, domain: "API_ACCOUNT", category: "REQUEST" }] },
+  { errors: [{ errorId: 20403, domain: "private/domain", category: "REQUEST" }] },
+  { errors: [{ errorId: 20403, domain: "API_ACCOUNT", category: "private-category" }] },
+  { errors: [{ errorId: 20403, domain: "API_ACCOUNT", category: "REQUEST", message: 123 }] },
+  { errors: Array.from({ length: 11 }, () => eligibilityError().errors[0]) },
+])("rejects a malformed policy error envelope without continuing: %#", async body => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("fulfillment_policy") ? Promise.resolve(json(body, 400)) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each(["envelope", "message", "longMessage", "json", "content-type"])("bounds and safely rejects a policy error's %s", async kind => {
+  const base = transport();
+  const fetch = vi.fn<typeof globalThis.fetch>((input, init) => {
+    if (!new URL(String(input)).pathname.endsWith("fulfillment_policy")) return base(input, init);
+    const body = { ...eligibilityError(), unused: kind === "envelope" ? "x".repeat(16 * 1024) : "" };
+    const response = kind === "json" ? new Response("{", { status: 400, headers: { "Content-Type": "application/json" } }) :
+      kind === "content-type" ? new Response("private-provider-error", { status: 400 }) :
+      json({ ...body, errors: body.errors.map(e => ({ ...e, ...(kind === "message" ? { message: "x".repeat(513) } : kind === "longMessage" ? { longMessage: "x".repeat(2049) } : {}) })) }, 400);
+    return Promise.resolve(response);
+  });
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.not.toThrow(/private-provider-error|fixture-access|20403/);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each([{}, { programs: null }, { programs: [{}] }, { programs: "invalid" }])("fails before policies/locations if enrollment cannot be established: %#", async body => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("get_opted_in_programs") ? Promise.resolve(json(body)) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it.each([401, 403, 404, 429, 500])("aborts independent reads after policy HTTP %i rather than hiding it as ineligibility", async status => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>((input, init) => new URL(String(input)).pathname.endsWith("fulfillment_policy") ? Promise.resolve(json(eligibilityError(), status)) : base(input, init));
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toBeInstanceOf(Error);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+it.each([15000, 45000])("honors the %i ms abort boundary even when a transport returns after abort", async limit => {
+  const base = transport(), controller = new AbortController(), original = AbortSignal.timeout;
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === limit ? controller.signal : original(ms));
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    if (new URL(String(input)).pathname.endsWith("get_opted_in_programs")) { controller.abort(); return json({ programs: [] }); }
+    return base(input, init);
+  });
+  try {
+    await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "unavailable" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timeout).toHaveBeenCalledWith(15000); expect(timeout).toHaveBeenCalledWith(45000);
+  } finally { timeout.mockRestore(); }
+});
+it.each([true, false])("never requests an eleventh location page (not enrolled: %s)", async notEnrolled => {
+  const base = transport(), fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(String(input));
+    if (notEnrolled && url.pathname.endsWith("get_opted_in_programs")) return json({ programs: [] });
+    if (!url.pathname.endsWith("/location")) return base(input, init);
+    const fixture = readinessFixture(url.pathname, url.searchParams) as { locations: object[] }, offset = Number(url.searchParams.get("offset"));
+    return json({ total: 11, offset, limit: 100, locations: [{ ...fixture.locations[0], merchantLocationKey: String(offset).padStart(50, "k") }], next: `https://api.sandbox.ebay.com/sell/inventory/v1/location?limit=100&offset=${offset + 1}` });
+  });
+  await expect(new EbayReadinessClient(fetch).inspect("fixture-access")).rejects.toMatchObject({ code: "malformed" });
+  expect(fetch).toHaveBeenCalledTimes(notEnrolled ? 12 : 15);
 });
 it.each(Array.from({ length: 14 }, (_, i) => i + 37))("accepts a %i-character merchant location key without truncation", async length => {
   const base = transport(), key = "k".repeat(length);

@@ -7,7 +7,7 @@ vi.mock("../../app/listings/[id]/ebay/actions", () => ({ checkEbayReadinessActio
 const report = (): EbayReadinessReport => ({
   environment: "sandbox", marketplace: "EBAY_US", checkedAt: "2026-11-09T00:00:00.000Z",
   registrationComplete: false, zeroMonthlyQuantityLimit: true, businessPoliciesEnrolled: false,
-  policies: { fulfillment: [], payment: [], return: [] }, locations: [],
+  policies: { state: "not-enrolled" }, locations: [],
   inventoryEligibility: "unverified", categoryCompatibility: "not-verified", canStage: false, canCreateOffer: false, canPublish: false,
 });
 beforeEach(() => { check.mockReset(); });
@@ -26,6 +26,9 @@ it("loads only on request, explains absent prerequisites, and never offers remot
   expect(check).toHaveBeenCalledWith("fixture", "version");
   expect(screen.getByText(/finish seller registration/)).toBeVisible();
   expect(screen.getByText(/Not enrolled — manage business policies/)).toBeVisible();
+  expect(screen.getByText(/Business policies are unavailable because/)).toBeVisible();
+  for (const kind of ["Fulfillment", "Payment", "Return"]) expect(screen.getByLabelText(kind + " policy")).toBeDisabled();
+  expect(screen.queryByText(/No existing non-motor/)).not.toBeInTheDocument();
   expect(screen.getByText(/No usable enabled warehouse/)).toBeVisible();
   expect(screen.getByText(/write eligibility remains unverified/)).toBeVisible();
   expect(screen.getByText(/sparse unpublished offer does not necessarily require/)).toBeVisible();
@@ -33,10 +36,11 @@ it("loads only on request, explains absent prerequisites, and never offers remot
 });
 it("allows only existing compatible candidates and keeps unsuitable locations disabled", async () => {
   const result = report();
-  result.policies.fulfillment = [
+  result.businessPoliciesEnrolled = true;
+  result.policies = { state: "available", collections: { fulfillment: [
     { id: "100", name: "Synthetic standard shipping", categoryTypes: ["ALL_EXCLUDING_MOTORS_VEHICLES"] },
     { id: "101", name: "Synthetic motor shipping", categoryTypes: ["MOTORS_VEHICLES"] },
-  ];
+  ], payment: [], return: [] } };
   result.locations = [
     { key: "enabled", name: null, enabled: true, warehouse: true, addressComplete: true },
     { key: "disabled", name: null, enabled: false, warehouse: true, addressComplete: true },
@@ -52,6 +56,43 @@ it("allows only existing compatible candidates and keeps unsuitable locations di
   for (const key of ["disabled", "store", "incomplete"]) expect(screen.getByRole("option", { name: new RegExp("\\(" + key + "\\)") })).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Inventory warehouse location"), { target: { value: "enabled" } });
   expect(check).toHaveBeenCalledTimes(1);
+});
+it("distinguishes successful empty policies from unavailable collections", async () => {
+  const result = report(); result.businessPoliciesEnrolled = true;
+  result.policies = { state: "available", collections: { fulfillment: [], payment: [], return: [] } };
+  check.mockResolvedValueOnce({ ok: true, data: result });
+  render(<EbaySellerReadiness listingId="fixture" version="version" connected authorized />);
+  fireEvent.click(screen.getByRole("button", { name: "Check eBay Seller Readiness" }));
+  expect(await screen.findByText(/Business-policy collections were successfully checked/)).toBeVisible();
+  expect(screen.getByLabelText("Fulfillment policy")).toBeEnabled();
+  expect(screen.getAllByText(/No existing non-motor EBAY_US policy/)).toHaveLength(3);
+});
+it.each(["ineligible", "unknown-failure"] as const)("shows %s as unavailable, with independent location results and no raw errors", async state => {
+  const result = report(); result.businessPoliciesEnrolled = true; result.policies = { state };
+  result.locations = [{ key: "existing-warehouse", name: "Synthetic warehouse", enabled: true, warehouse: true, addressComplete: true }];
+  check.mockResolvedValueOnce({ ok: true, data: result });
+  render(<EbaySellerReadiness listingId="fixture" version="version" connected authorized />);
+  fireEvent.click(screen.getByRole("button", { name: "Check eBay Seller Readiness" }));
+  await screen.findByRole("region", { name: "Seller readiness result" });
+  for (const kind of ["Fulfillment", "Payment", "Return"]) expect(screen.getByLabelText(kind + " policy")).toBeDisabled();
+  expect(screen.getByRole("option", { name: /Synthetic warehouse/ })).toBeEnabled();
+  expect(screen.queryByText(/No existing non-motor/)).not.toBeInTheDocument();
+  if (state === "unknown-failure") expect(screen.getByRole("alert")).toHaveTextContent(/inspection failed for an unknown reason/);
+  else expect(screen.getByText(/reported this Sandbox seller is ineligible/)).toBeVisible();
+});
+it("clears temporary policy/location selections when a later check is not enrolled", async () => {
+  const first = report(); first.businessPoliciesEnrolled = true;
+  first.policies = { state: "available", collections: { fulfillment: [{ id: "100", name: "Synthetic policy", categoryTypes: ["ALL_EXCLUDING_MOTORS_VEHICLES"] }], payment: [], return: [] } };
+  check.mockResolvedValueOnce({ ok: true, data: first }).mockResolvedValueOnce({ ok: true, data: report() });
+  render(<EbaySellerReadiness listingId="fixture" version="version" connected authorized />);
+  const button = screen.getByRole("button", { name: "Check eBay Seller Readiness" });
+  fireEvent.click(button); const select = await screen.findByLabelText("Fulfillment policy");
+  fireEvent.change(select, { target: { value: "100" } }); expect(select).toHaveValue("100");
+  await waitFor(() => expect(button).toBeEnabled()); fireEvent.click(button);
+  await screen.findByText(/Business policies are unavailable because/);
+  expect(screen.getByLabelText("Fulfillment policy")).toBeDisabled();
+  expect(screen.getByLabelText("Fulfillment policy")).toHaveValue("");
+  expect(screen.queryByRole("option", { name: /Synthetic policy/ })).not.toBeInTheDocument();
 });
 it("clears an earlier report when a later explicit check fails", async () => {
   check.mockResolvedValueOnce({ ok: true, data: report() }).mockResolvedValueOnce({ ok: false, error: "Seller connection changed. Check again." });
