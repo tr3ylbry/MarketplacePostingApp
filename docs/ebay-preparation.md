@@ -55,8 +55,8 @@ The real parser and cache were exercised against the exact responses retained on
 
 ## Remaining Stage 9B work
 
-- [Seller location/policy readiness](ebay-seller-readiness.md) is implemented with fake-provider validation; real read-only consent/endpoint acceptance remains separately pending.
-- A private-image export boundary and EPS transfer, including byte validation, retention and residual-copy limitations. Reverb's signed-URL ingestion architecture is not reused as an assumed EPS contract.
+- [Seller location/policy readiness](ebay-seller-readiness.md) is merged in PR #10 with bounded real unenrolled/empty-location and browser-privacy acceptance. Real enrolled policy/nonempty pagination coverage remains deferred.
+- [Private-photo preparation](ebay-private-media.md) adds explicit owner-authorized private byte validation and source retention. EPS upload/readback, durable associations/uncertainty and residual-copy handling remain gated; no real transfer is enabled. Reverb's signed-URL ingestion is not assumed to be an EPS contract.
 - Explicit Sandbox inventory staging with conservative SKU reconciliation, concurrency fencing and minimum safe cleanup. Inventory PUT replacement can affect associated offers; write safety must be reviewed first.
 - Focused fake-provider coverage, followed by a separately approved real Sandbox plan specifying exact test resources and cleanup.
 

@@ -1,10 +1,19 @@
 import { del, get, head, issueSignedToken, presignUrl } from "@vercel/blob";
 import { blobImageSourceSchema } from "../../domain/listingImage";
 import { ImageOperationError, matchesImageHeader, READ_TTL_MS, PROVIDER_READ_TTL_MS, type ProviderImageSigner, type ImageStorage, type ImageUpload } from "../../application/imageStorage";
+import { PrivateImagePreparationError, type PrivateImageReader } from "../../application/ebayPrivateImages";
+import { collectPrivateImage } from "./readPrivateImage";
 
 // Credentials are resolved server-side by the SDK: OIDC + BLOB_STORE_ID preferred.
 // This module is only wired through application/server (server-only).
-export class VercelBlobImageStorage implements ImageStorage {
+export class VercelBlobImageStorage implements ImageStorage, PrivateImageReader {
+  async readPrivateImage(source: Parameters<PrivateImageReader["readPrivateImage"]>[0], signal: AbortSignal) {
+    const trusted = blobImageSourceSchema.parse(source);
+    signal.throwIfAborted();
+    const result = await get(trusted.pathname, { access: "private", useCache: false, abortSignal: signal });
+    if (!result || result.statusCode !== 200) throw new PrivateImagePreparationError("invalid");
+    return collectPrivateImage(trusted, { ...result.blob, stream: result.stream }, signal);
+  }
   async prepareUpload(upload: ImageUpload) {
     const scope = { pathname: upload.pathname, validUntil: Date.parse(upload.expiresAt),
       allowedContentTypes: [upload.contentType], maximumSizeInBytes: upload.size };
@@ -52,4 +61,4 @@ export class VercelBlobImageStorage implements ImageStorage {
   async deleteObject(pathname: string) { await del(pathname, { abortSignal: AbortSignal.timeout(15000) }); }
 }
 
-export const imageStorage: ImageStorage & ProviderImageSigner = new VercelBlobImageStorage();
+export const imageStorage: ImageStorage & ProviderImageSigner & PrivateImageReader = new VercelBlobImageStorage();

@@ -9,6 +9,7 @@ const uploadSchema = uploadInputSchema.extend({ id: z.string(), listingId: z.str
 type Upload = z.infer<typeof uploadSchema>;
 const objects = new Map<string, { bytes: Buffer; upload: Upload; uploadedAt: string }>();
 const capabilities = new Map<string, { operation: "put" | "get"; pathname: string; expires: number; upload?: Upload }>();
+let privateReads = 0;
 function grant(operation: "put" | "get", pathname: string, expires: number, upload?: Upload) {
   const id = randomUUID(); capabilities.set(id, { operation, pathname, expires, upload });
   return `http://127.0.0.1:4311/object/${id}`;
@@ -28,6 +29,12 @@ createServer(async (request, response) => {
       for await (const chunk of request) { size += chunk.length; if (size > 8192) throw new Error("Too large"); chunks.push(Buffer.from(chunk)); }
       const input: unknown = JSON.parse(Buffer.concat(chunks).toString());
       const operation = request.url.slice("/control/".length);
+      if (operation === "stats") { response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ privateReads })); return; }
+      if (operation === "bytes") {
+        const { pathname } = z.object({ pathname: z.string() }).strict().parse(input), object = objects.get(pathname);
+        if (!object) { response.writeHead(404).end(); return; }
+        privateReads++; response.setHeader("Content-Type", object.upload.contentType); response.setHeader("Content-Length", object.bytes.length); response.end(object.bytes); return;
+      }
       let result: unknown = null;
       if (operation === "prepare") {
         const upload = uploadSchema.parse(input);

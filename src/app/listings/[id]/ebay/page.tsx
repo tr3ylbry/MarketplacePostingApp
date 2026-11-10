@@ -6,6 +6,8 @@ import { ebayService } from "../../../../application/ebayServer";
 import { safeEbayError } from "../../../../application/ebayConnection";
 import { EbayPreparation } from "../../../../features/ebay/EbayPreparation";
 import { EbaySellerReadiness } from "../../../../features/ebay/EbaySellerReadiness";
+import { EbayPrivatePhotos } from "../../../../features/ebay/EbayPrivatePhotos";
+import { imageName } from "../../../../domain/listingImage";
 
 export const dynamic = "force-dynamic";
 export default async function EbayPreparationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +21,9 @@ export default async function EbayPreparationPage({ params }: { params: Promise<
     const connected = status.state === "connected" || status.state === "expired";
     return <><EbayPreparation listingId={id} version={listing.updatedAt} brand={listing.attributes.brand}
       model={listing.attributes.model} connected={connected} />
-      <EbaySellerReadiness listingId={id} version={listing.updatedAt} connected={connected} authorized={status.readinessAuthorized} /></>;
+      <EbaySellerReadiness listingId={id} version={listing.updatedAt} connected={connected} authorized={status.readinessAuthorized} />
+      <EbayPrivatePhotos key={id + ":" + listing.updatedAt} listingId={id} version={listing.updatedAt} connected={connected} photos={listing.images.map(image => ({ id: image.id, order: image.order,
+        name: imageName(image), supported: image.source.kind === "vercel-blob" && ["image/jpeg", "image/png"].includes(image.source.contentType) }))} /></>;
   } catch (error) {
     return <section className="panel"><h2>eBay preparation — SANDBOX</h2><p role="alert">{safeEbayError(error)}</p><Link href="/settings/integrations/ebay">eBay connection settings</Link></section>;
   }

@@ -1,6 +1,6 @@
 # Proposed eBay Stage 9B slices after seller readiness
 
-Design only, reviewed 2026-11-09. Neither slice is implemented or authorized for real provider writes. Review and separately approve the seller-readiness PR before opening another implementation branch. Stage 9B remains in progress. No `publishOffer`, remote content synchronization, seller-account mutation or Production gateway belongs in either slice.
+Lifecycle design reviewed 2026-11-10. Seller-readiness PR #10 is merged with exact post-merge CI green. A separate [private-photo preparation slice](ebay-private-media.md) implements only owner-authorized byte validation and source retention; EPS transfer/associations and Inventory staging below remain unimplemented and unauthorized for real writes. Stage 9B remains in progress. No `publishOffer`, remote content synchronization, seller-account mutation or Production gateway belongs in either slice.
 
 ## Separate future PR: private Blob bytes to EPS
 
