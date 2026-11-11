@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { createTestAuth } from "../src/test/auth";
 import { listingFixture } from "../src/test/fixtures";
+import { readFile } from "node:fs/promises";
+import { readStoredZip } from "../src/test/readStoredZip";
 
 const { pool, auth } = createTestAuth();
 let userId: string;
@@ -70,7 +72,11 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await expect(images.first()).toContainText("front.png");
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Photo Bundle" }).click();
-  expect((await download).suggestedFilename()).toContain("PhotoBundle.zip");
+  const archive = await download;
+  expect(archive.suggestedFilename()).toBe("E2E Guitar_PhotoBundle.zip");
+  const entries = readStoredZip(await readFile((await archive.path())!));
+  expect(entries.map(entry => entry.path)).toEqual(["E2E_Guitar_eBayPhotos/01_front.png", "E2E_Guitar_ReverbPhotos/01_front.png"]);
+  for (const entry of entries) expect(entry.data).toEqual(fixture);
   await page.getByLabel("Title", { exact: false }).first().fill("Edited E2E Guitar");
   await page.getByRole("button", { name: "Save Changes", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
@@ -85,6 +91,92 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page).toHaveURL(/\/listings$/);
   await expect(page.getByRole("link", { name: "Edited E2E Guitar", exact: true })).toHaveCount(0);
+});
+
+test("photo bundles cancel on navigation, recover from click failure and deliver intact Unicode archives", async ({ page, context }) => {
+  await context.route("**/*", route => {
+    const url = new URL(route.request().url());
+    return url.hostname === "127.0.0.1" && ["3100", "4311"].includes(url.port) ? route.continue() : route.abort();
+  });
+  await page.addInitScript(() => {
+    const active = new Set<string>();
+    const probe = { created: 0, revoked: 0, active, restoreClick: () => {} };
+    (window as unknown as { zipProbe: typeof probe }).zipProbe = probe;
+    const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = blob => { const url = create(blob); if (blob instanceof Blob && blob.type === "application/zip") { active.add(url); probe.created++; } return url; };
+    URL.revokeObjectURL = url => { if (active.delete(url)) probe.revoked++; revoke(url); };
+  });
+  const stats = () => page.evaluate(() => {
+    const probe = (window as unknown as { zipProbe: { created: number; revoked: number; active: Set<string> } }).zipProbe;
+    return { created: probe.created, revoked: probe.revoked, active: probe.active.size };
+  });
+  await page.goto("/listings/new");
+  await page.getByRole("button", { name: /eBay/ }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("Title", { exact: false }).first().fill("Synthetic ZIP Guitar");
+  await page.getByLabel("Description", { exact: false }).fill("Disposable synthetic guitar for isolated photo bundle tests.");
+  await page.getByLabel("Price", { exact: false }).first().fill("25");
+  await page.getByRole("button", { name: "Save Listing", exact: true }).click();
+  await expect(page).toHaveURL(/\/listings\/[^/]+\/edit$/);
+  const editPath = new URL(page.url()).pathname;
+  const id = editPath.split("/")[2]; ownedIds.add(id);
+  const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6jWQAAAAASUVORK5CYII=", "base64");
+  await page.getByLabel("Upload photos").setInputFiles(["front.雪", "rear.png"].map(name => ({ name, mimeType: "image/png", buffer: fixture })));
+  await expect(page.getByRole("button", { name: "Remove rear.png", exact: true })).toBeEnabled();
+  let hold = true;
+  let release: (() => void) | undefined;
+  let reads = 0;
+  await page.route(`**/api/listings/${id}/images/*`, async route => {
+    if (route.request().resourceType() !== "fetch") { await route.continue(); return; }
+    reads++;
+    if (hold) await new Promise<void>(resolve => { release = resolve; });
+    try { await route.fulfill({ status: 200, contentType: "image/png", body: fixture }); } catch { /* The operation may already have aborted this request. */ }
+  });
+  await page.getByRole("button", { name: "Download Photo Bundle" }).click();
+  await expect.poll(() => reads).toBe(1);
+  await page.getByRole("button", { name: "Cancel photo bundle" }).click();
+  await expect(page.getByRole("status")).toHaveText("Photo bundle cancelled.");
+  await expect(page.getByRole("button", { name: "Download Photo Bundle" })).toBeFocused();
+  release!();
+  expect(await stats()).toEqual({ created: 0, revoked: 0, active: 0 });
+
+  await page.getByRole("button", { name: "Download Photo Bundle" }).click();
+  await expect.poll(() => reads).toBe(2);
+  await page.getByRole("button", { name: "Exit To Home", exact: true }).click();
+  await page.getByRole("button", { name: "Exit Without Saving", exact: true }).click();
+  await expect(page).toHaveURL(/\/listings$/);
+  release!();
+  await expect.poll(async () => (await stats()).created).toBe(0);
+  expect(reads).toBe(2);
+
+  hold = false;
+  await page.goto(editPath);
+  await page.evaluate(() => {
+    const click = HTMLAnchorElement.prototype.click;
+    (window as unknown as { zipProbe: { restoreClick: () => void } }).zipProbe.restoreClick = () => { HTMLAnchorElement.prototype.click = click; };
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download.endsWith("_PhotoBundle.zip")) throw new Error("Synthetic download click failure");
+      click.call(this);
+    };
+  });
+  await page.getByRole("button", { name: "Download Photo Bundle" }).click();
+  await expect(page.getByRole("region", { name: "Listing photos" }).getByRole("alert")).toHaveText("Synthetic download click failure");
+  expect(await stats()).toEqual({ created: 1, revoked: 1, active: 0 });
+  await expect(page.locator("a[download]")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { zipProbe: { restoreClick: () => void } }).zipProbe.restoreClick());
+  const next = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Photo Bundle" }).click();
+  const download = await next;
+  expect(download.suggestedFilename()).toBe("Synthetic ZIP Guitar_PhotoBundle.zip");
+  const entries = readStoredZip(await readFile((await download.path())!));
+  expect(entries.map(entry => entry.path)).toEqual(["Synthetic_ZIP_Guitar_eBayPhotos/01_front.雪", "Synthetic_ZIP_Guitar_eBayPhotos/02_rear.png"]);
+  expect(entries[0].utf8).toBe(true);
+  for (const entry of entries) expect(entry.data).toEqual(fixture);
+  await expect.poll(stats).toEqual({ created: 2, revoked: 2, active: 0 });
+  await page.goto(`/listings/${id}`);
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page).toHaveURL(/\/listings$/);
 });
 
 test("sign out revokes access and an unauthenticated user reaches only sign-in", async ({ page, context }) => {

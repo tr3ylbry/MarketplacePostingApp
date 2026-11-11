@@ -5,7 +5,6 @@ import type { Listing } from "../../../domain/listing";
 import { imageName, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT } from "../../../domain/listingImage";
 import { prepareImageAction, finalizeImageAction, removeImageAction, reorderImagesAction } from "../../../app/listings/imageActions";
 import { convertImageForUpload } from "../photoUploadProcessing";
-import { toFormInput } from "../listingFormMapping";
 
 export function imageReadPath(listingId: string, imageId: string) {
   return `/api/listings/${encodeURIComponent(listingId)}/images/${encodeURIComponent(imageId)}`;
@@ -35,8 +34,25 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
   const uploadInput = useRef<HTMLInputElement>(null);
   const photoItems = useRef(new Map<string, HTMLLIElement>());
   const focusAfterChange = useRef<{ id: string | null } | null>(null);
+  const mounted = useRef(false);
+  const bundleOperation = useRef<{ controller: AbortController; timedOut: boolean } | null>(null);
+  const downloadCleanups = useRef(new Set<() => void>());
+  const bundleButton = useRef<HTMLButtonElement>(null);
+  const focusBundle = useRef(false);
+  const [bundling, setBundling] = useState(false);
   useEffect(() => {
-    if (busy || !focusAfterChange.current) return;
+    mounted.current = true;
+    const cleanups = downloadCleanups.current;
+    return () => {
+      mounted.current = false;
+      bundleOperation.current?.controller.abort();
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, []);
+  useEffect(() => {
+    if (busy) return;
+    if (focusBundle.current) { bundleButton.current?.focus(); focusBundle.current = false; }
+    if (!focusAfterChange.current) return;
     const { id } = focusAfterChange.current;
     (id ? photoItems.current.get(id) : uploadInput.current)?.focus();
     focusAfterChange.current = null;
@@ -91,23 +107,40 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
     });
   }
   async function bundle() {
-    await run(async () => {
-      setStatus("Building photo bundle…");
-      const { buildListingPhotoBundle } = await import("../photoBundle");
-      const photos = [];
-      // Sequential reads bound peak download concurrency; the ZIP still requires memory.
-      for (const image of images) {
-        if (image.source.kind !== "vercel-blob") continue;
-        const response = await fetch(imageReadPath(listing.id, image.id), { cache: "no-store", referrerPolicy: "no-referrer" });
-        if (!response.ok) throw new Error("An image could not be downloaded. Try again.");
-        photos.push({ id: image.id, name: imageName(image), file: new File([await response.blob()], imageName(image), { type: image.source.contentType }) });
+    // A synchronous ref guard also covers clicks before React commits disabled controls.
+    if (bundleOperation.current || busy || disabled) return;
+    const operation = { controller: new AbortController(), timedOut: false };
+    bundleOperation.current = operation;
+    const { signal } = operation.controller;
+    const current = () => mounted.current && bundleOperation.current === operation;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    setBusy(true); setBundling(true); setError(null); setStatus("Planning photo bundle…");
+    try {
+      const [{ planListingPhotoBundle, buildListingPhotoBundle }, { readBundlePhoto, initiateBundleDownload, BUNDLE_TIMEOUT_MS }] = await Promise.all([
+        import("../photoBundle"), import("../photoBundleDownload"),
+      ]);
+      signal.throwIfAborted();
+      const plan = planListingPhotoBundle(listing, images.flatMap(image => image.source.kind === "vercel-blob"
+        ? [{ id: image.id, name: imageName(image), size: image.source.size }] : []));
+      deadline = setTimeout(() => { operation.timedOut = true; operation.controller.abort(); }, BUNDLE_TIMEOUT_MS);
+      const zip = await buildListingPhotoBundle(plan,
+        (photo, signal) => readBundlePhoto(imageReadPath(listing.id, photo.id), photo.size, signal),
+        { signal, onProgress: (phase, completed, total) => { if (current()) setStatus(`${phase} photo bundle: ${completed} of ${total}…`); } });
+      signal.throwIfAborted();
+      const cleanup = initiateBundleDownload(zip, plan.downloadName, signal, cleanup => downloadCleanups.current.delete(cleanup));
+      downloadCleanups.current.add(cleanup);
+      if (current()) setStatus("Photo bundle prepared.");
+    } catch (error) {
+      if (current()) {
+        setStatus(signal.aborted && !operation.timedOut ? "Photo bundle cancelled." : "");
+        if (operation.timedOut) setError("Photo bundle timed out. Check your connection and try again with fewer photos.");
+        else if (!signal.aborted) setError(error instanceof Error ? error.message : "Photo bundle failed. Try again.");
       }
-      const zip = await buildListingPhotoBundle(toFormInput(listing), photos);
-      const url = URL.createObjectURL(zip);
-      const link = document.createElement("a"); link.href = url; link.download = `${listing.title || "Listing"}_PhotoBundle.zip`; link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return "Photo bundle prepared.";
-    });
+    } finally {
+      clearTimeout(deadline);
+      if (current()) { focusBundle.current = true; setBusy(false); setBundling(false); }
+      if (bundleOperation.current === operation) bundleOperation.current = null;
+    }
   }
   return <section className="panel" aria-label="Listing photos" aria-busy={busy}>
     <h3>Photos</h3>
@@ -115,7 +148,10 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
     <fieldset disabled={!ready || disabled || busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
       {onChange ? <label>Upload photos<input ref={uploadInput} type="file" accept="image/jpeg,image/png,image/webp,.heic,.heif" multiple onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) void upload(files); }} /></label> : null}
       {!images.length ? <p>No photos yet. Upload a file to save a private photo.</p> : null}
-      {images.some(image => image.source.kind === "vercel-blob") ? <button className="secondary-button" type="button" onClick={bundle}>Download Photo Bundle</button> : null}
+      {images.some(image => image.source.kind === "vercel-blob") ? <>
+        <button ref={bundleButton} className="secondary-button" type="button" onClick={bundle} aria-describedby="photo-bundle-limits">Download Photo Bundle</button>
+        <p id="photo-bundle-limits">Bundle limits: 32 MiB of needed photos and 64 MiB ZIP. Marketplace folders may repeat photos.</p>
+      </> : null}
       <ol className="photo-grid" style={{ listStyle: "none", padding: 0 }}>
         {images.map((image, index) => <li key={image.id} data-image-id={image.id} tabIndex={-1} aria-label={`Photo ${index + 1}: ${imageName(image)}`} ref={element => { if (element) photoItems.current.set(image.id, element); else photoItems.current.delete(image.id); }}>
           {image.source.kind === "vercel-blob" ? <>
@@ -131,6 +167,7 @@ export function ImageGallery({ listing, onChange, disabled = false }: { listing:
         </li>)}
       </ol>
     </fieldset>
+    {bundling ? <button type="button" className="secondary-button" onClick={() => bundleOperation.current?.controller.abort()}>Cancel photo bundle</button> : null}
     <p role="status">{status}</p>
     {error ? <p role="alert">{error}</p> : null}
   </section>;
