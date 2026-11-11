@@ -77,7 +77,7 @@ test("create, reload, edit, preview warnings and delete a database-backed listin
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText("1 / 2")).toBeVisible();
   await expect(page.getByText("1. front.png").first()).toBeVisible();
-  await page.getByRole("button", { name: "→", exact: true }).click();
+  await page.getByRole("button", { name: "Next marketplace preview", exact: true }).click();
   await expect(page.getByText(/Category is required for Reverb/)).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Edited E2E Guitar", exact: true })).toBeVisible();

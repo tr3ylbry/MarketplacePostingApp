@@ -1,7 +1,7 @@
 "use client";
 import { type CreateListingInput, validateListingInput } from "../listingFormInput";
 import { toFormInput } from "../listingFormMapping";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   type Listing,
   type PlatformSiteKey,
@@ -45,13 +45,13 @@ const emptyState: CreateListingInput = {
   youtubeLink: "",
   purchasePrice: "",
   shippingRate: "",
-  craigslistCity: "Tucson",
+  craigslistCity: "",
   craigslistZipCode: "",
   craigslistSizeDimensions: "",
-  craigslistPhoneNumber: "5855078535",
-  craigslistContactName: "Trey",
-  craigslistStreet: "Bermuda",
-  craigslistCrossStreet: "Country Club and Glenn",
+  craigslistPhoneNumber: "",
+  craigslistContactName: "",
+  craigslistStreet: "",
+  craigslistCrossStreet: "",
   imageNames: [],
 };
 
@@ -177,6 +177,22 @@ export function ListingForm({
   const [hasSavedDraft, setHasSavedDraft] = useState(mode === "edit" && Boolean(listing));
   const [isDirty, setIsDirty] = useState(false);
   const [showSavedToast, setShowSavedToast] = useState(false);
+  const exitDialog = useRef<HTMLDialogElement>(null);
+  const cancelExit = useRef<HTMLButtonElement>(null);
+  const errorSummary = useRef<HTMLElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
+  const [validationAttempt, setValidationAttempt] = useState(0);
+  useEffect(() => { if (mode === "create") titleInput.current?.focus(); }, [mode]);
+
+  useEffect(() => {
+    const dialog = exitDialog.current;
+    if (showExitModal && dialog && !dialog.open) { dialog.showModal(); cancelExit.current?.focus(); }
+    else if (!showExitModal && dialog?.open) dialog.close();
+  }, [showExitModal]);
+
+  useEffect(() => {
+    if (validationAttempt) errorSummary.current?.focus();
+  }, [validationAttempt]);
 
 
   useEffect(() => {
@@ -257,6 +273,7 @@ export function ListingForm({
     setSubmitAttempted(true);
 
     if (validationErrors.length > 0) {
+      setValidationAttempt(value => value + 1);
       return;
     }
 
@@ -292,16 +309,16 @@ export function ListingForm({
 
     if (validationErrors.length > 0) {
       setShowExitModal(false);
+      setValidationAttempt(value => value + 1);
       return;
     }
 
-    if (!await onCreateAndExit(nextInput)) return;
+    if (!await onCreateAndExit(nextInput)) { setShowExitModal(false); return; }
     setShowExitModal(false);
   }
 
   const canContinue = hasSavedDraft && !isDirty;
-  const isSaveDisabled =
-    !isDirty || validationErrors.length > 0;
+  const isSaveDisabled = mode === "edit" && !isDirty;
 
   return (
     <>
@@ -351,6 +368,7 @@ export function ListingForm({
         </div>
 
         <form className="listing-form" onSubmit={handleSubmit}>
+          <p>Save keeps this listing in your private inventory. Required fields are marked *. Marketplace preparation is a separate action.</p>
           <section className="form-section">
             <div className="form-section-header">
               <h3>Shared Fields</h3>
@@ -360,6 +378,8 @@ export function ListingForm({
               <label>
                 <RequiredLabel label="Title" required />
                 <input
+                  ref={titleInput}
+                  aria-required="true"
                   maxLength={35}
                   onChange={(event) => updateField("title", event.target.value)}
                   placeholder="Fender Player Stratocaster"
@@ -372,6 +392,7 @@ export function ListingForm({
               <label>
                 <RequiredLabel label="Description" required />
                 <textarea
+                  aria-required="true"
                   onChange={(event) => updateField("description", event.target.value)}
                   placeholder="Include condition details, included accessories, pickup or shipping notes, and anything a buyer should know."
                   rows={7}
@@ -384,6 +405,7 @@ export function ListingForm({
               <label>
                 <RequiredLabel label="Price" required />
                 <input
+                  aria-required="true"
                   inputMode="numeric"
                   onChange={(event) => handlePriceChange(event.target.value)}
                   onBlur={(event) => handlePriceBlur(event.target.value)}
@@ -732,10 +754,10 @@ export function ListingForm({
       </section>
 
       {activeErrors.length > 0 ? (
-        <aside className="validation-dock">
+        <aside ref={errorSummary} tabIndex={-1} role="alert" aria-labelledby="listing-errors-title" className="validation-dock">
           <div className="validation-card">
             <p className="panel-kicker">Missing Fields</p>
-            <h2>Complete These Fields</h2>
+            <h2 id="listing-errors-title">Complete These Fields</h2>
             <ul className="validation-list">
               {activeErrors.map((error) => (
                 <li key={error}>{error}</li>
@@ -752,42 +774,37 @@ export function ListingForm({
         </div>
       ) : null}
 
-      {showExitModal ? (
-        <div className="modal-backdrop" role="presentation">
-          <div
-            aria-labelledby="exit-create-title"
-            aria-modal="true"
-            className="modal-card"
-            role="dialog"
+      <dialog ref={exitDialog} onCancel={() => setShowExitModal(false)}
+        aria-labelledby="exit-create-title"
+        className="modal-card"
+      >
+        <p className="panel-kicker">Exit Listing</p>
+        <h2 id="exit-create-title">Save Before Leaving?</h2>
+        <p className="modal-copy">
+          You can save this listing before returning to the home page, or leave
+          without saving.
+        </p>
+        <div className="modal-actions">
+          <button className="primary-button" onClick={handleSaveAndExit} type="button">
+            Save And Exit
+          </button>
+          <button
+            className="secondary-button"
+            onClick={handleExitWithoutSaving}
+            type="button"
           >
-            <p className="panel-kicker">Exit Create Listing</p>
-            <h2 id="exit-create-title">Save Before Leaving?</h2>
-            <p className="modal-copy">
-              You can save this listing before returning to the home page, or leave
-              without saving.
-            </p>
-            <div className="modal-actions">
-              <button className="primary-button" onClick={handleSaveAndExit} type="button">
-                Save And Exit
-              </button>
-              <button
-                className="secondary-button"
-                onClick={handleExitWithoutSaving}
-                type="button"
-              >
-                Exit Without Saving
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() => setShowExitModal(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+            Exit Without Saving
+          </button>
+          <button
+            ref={cancelExit}
+            className="secondary-button"
+            onClick={() => setShowExitModal(false)}
+            type="button"
+          >
+            Cancel
+          </button>
         </div>
-      ) : null}
+      </dialog>
     </>
   );
 }

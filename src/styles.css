@@ -25,6 +25,23 @@ textarea {
   font: inherit;
 }
 
+:focus-visible {
+  outline: 3px solid #155e9a;
+  outline-offset: 3px;
+}
+
+.panel, .panel-header > *, .photo-grid > li, .preview-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.panel input, .panel select, .panel textarea { max-width: 100%; }
+.panel-header { flex-wrap: wrap; }
+.photo-grid img { max-width: 100%; height: auto; }
+.photo-grid > li:focus { outline: 3px solid #155e9a; outline-offset: 3px; }
+.ebay-options label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-block: 12px; min-width: 0; }
+.ebay-options input, .ebay-options select, .ebay-options textarea { width: 100%; min-width: 0; }
+
 button,
 .home-action-card,
 .marketplace-tile,
@@ -918,11 +935,17 @@ button:active:not(:disabled),
 
 .modal-card {
   width: min(460px, 100%);
+  max-width: calc(100% - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid #d5dde5;
   background: #fff;
   border-radius: 24px;
   padding: 24px;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
 }
+
+.modal-card::backdrop { background: rgba(15, 23, 42, 0.28); }
 
 .modal-copy {
   margin: 0 0 18px;

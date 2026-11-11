@@ -7,7 +7,14 @@ export interface PrivatePhotoSummary { id: string; order: number; name: string; 
 export function EbayPrivatePhotos({ listingId, version, photos, connected }: { listingId: string; version: string; photos: PrivatePhotoSummary[]; connected: boolean }) {
   const [hydrated, setHydrated] = useState(false), [busy, start] = useTransition();
   const [reviews, setReviews] = useState<Record<string, PrivateImageReview>>({}), [error, setError] = useState("");
+  const [now, setNow] = useState(Date.now);
   useEffect(() => setHydrated(true), []);
+  useEffect(() => {
+    const nextExpiry = Math.min(...Object.values(reviews).map(review => Date.parse(review.expiresAt)).filter(expiry => expiry > now));
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(2147483647, Math.max(0, nextExpiry - Date.now())));
+    return () => window.clearTimeout(timer);
+  }, [reviews, now]);
   return <section className="panel" aria-labelledby="private-photo-title" aria-busy={busy}>
     <h2 id="private-photo-title">Private photo preparation — SANDBOX</h2>
     <p>Validate one saved private JPEG or PNG at a time. Nothing is uploaded to eBay. Results are temporary and do not authorize an export.</p>
@@ -20,11 +27,11 @@ export function EbayPrivatePhotos({ listingId, version, photos, connected }: { l
         try { const result = await prepareEbayPrivateImageAction(listingId, version, photo.id); if (result.ok) setReviews(previous => ({ ...previous, [photo.id]: result.data })); else setError(result.error); }
         catch { setError("Private photo preparation could not be completed."); }
       })}>Validate photo {photo.order + 1}</button>
-      {reviews[photo.id] ? <p role="status">Photo verified for local export review: {reviews[photo.id].width} × {reviews[photo.id].height} pixels · {reviews[photo.id].size} bytes. Export not attempted. Revalidate after changes or before any future transfer.</p> : null}
+      {connected && reviews[photo.id] ? <p role="status">{Date.parse(reviews[photo.id].expiresAt) > now ? <>Photo verified for local export review: {reviews[photo.id].width} × {reviews[photo.id].height} pixels · {reviews[photo.id].size} bytes. Export not attempted.</> : "Photo review expired. Validate this photo again."} Revalidate after changes or before any future transfer.</p> : null}
     </li>)}</ol>}
     {busy ? <p role="status">Validating private photo…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     <button disabled>Upload to eBay — unavailable</button>
-    <p>EPS upload, readback and durable export recovery are not implemented here. The image-specific Sandbox host and provider limits need confirmation. A separately reviewed sell.inventory authorization is also required; that permission allows inventory writes beyond image upload. No new permission is requested by validation.</p>
+    <p>Sending photos to eBay is not available yet. Its test photo-upload behavior and photo-privacy requirements must be verified first. Validating a photo only checks the local private copy; it does not request additional seller permissions.</p>
   </section>;
 }

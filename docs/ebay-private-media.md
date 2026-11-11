@@ -34,6 +34,8 @@ An image/listing still disappears from the application immediately. The existing
 
 There is **no schema change**: this slice creates no remote resource and therefore needs no durable provider association. Temporary validation is not falsely persisted as an EPS export. The future association/attempt ledger must precede the first provider POST; it is not optional work that can follow real uploads.
 
+The UI marks temporary photo reviews expired when their deadline passes; this is a local timer, not polling or renewed export permission. Updated listing/connection state resets temporary preparation. [The isolated walkthrough](isolated-walkthrough.md) reproduces this workflow without real provider access. [The proposed photo-export privacy policy](photo-export-privacy.md) defines a future separate derivative, orientation/color handling and acceptance cases; it does not add sanitization to current bytes.
+
 ## Verified provider contract and unresolved gates
 
 Reviewed 2026-11-10 against the [Media v1_beta.5.0 OpenAPI](https://developer.ebay.com/api-docs/master/commerce/media/openapi/3/commerce_media_v1_beta_oas3.json), [Media overview](https://developer.ebay.com/api-docs/commerce/media/static/overview.html) and image guide:

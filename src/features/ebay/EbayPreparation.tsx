@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EbayAspect, EbayCategoryBranch, EbayCategoryRequirements } from "../../application/ebayMetadata";
 import type { EbayPreparationReview } from "../../application/ebayPreparationMapping";
 import { loadEbayMetadataAction, reviewEbayPreparationAction } from "../../app/listings/[id]/ebay/actions";
@@ -17,6 +17,10 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
   const [conditionId, setConditionId] = useState("");
   const [values, setValues] = useState<Record<string, string[]>>({});
   const [review, setReview] = useState<EbayPreparationReview | null>(null);
+  const categoryHeading = useRef<HTMLParagraphElement>(null);
+  const reviewRegion = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (branch) categoryHeading.current?.focus(); }, [branch]);
+  useEffect(() => { if (review) reviewRegion.current?.focus(); }, [review]);
 
   async function load(categoryId?: string) {
     setPending(true); setError(null); setReview(null);
@@ -57,12 +61,12 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
       <Link href="/settings/integrations/ebay">eBay connection settings</Link>
       {!connected ? <p>Connect your verified eBay Sandbox seller before loading options.</p> : null}
     </div>
-    <fieldset className="panel" disabled={!ready || pending || !connected}>
+    <fieldset className="panel ebay-options" disabled={!ready || pending || !connected}>
       <legend>Category and item details</legend>
       <button type="button" onClick={() => void load()}>Load eBay categories</button>
       {branch ? <>
         <p>Category tree version: {branch.treeVersion}</p>
-        <p>{branch.category?.name ?? "Browse a category branch"}</p>
+        <p ref={categoryHeading} tabIndex={-1}>{branch.category?.name ?? "Browse a category branch"}</p>
         <ul>{branch.children.map(child => <li key={child.id}><button type="button" onClick={() => void load(child.id)}>{child.leaf ? "Select" : "Browse"} {child.name}</button></li>)}</ul>
       </> : null}
       {requirements ? <>
@@ -76,12 +80,13 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
         {requirements.aspects.map(a => {
           const supported = supportsInput(a);
           return <label key={a.name}>{a.name}{a.required ? " (required)" : " (optional)"}
-            {a.mode === "SELECTION_ONLY" ? <select multiple={a.cardinality === "MULTI"} disabled={!supported}
+            {a.mode === "SELECTION_ONLY" ? <select multiple={a.cardinality === "MULTI"} disabled={!supported} aria-required={a.required}
+              aria-describedby={`aspect-help-${requirements.aspects.indexOf(a)}`}
               value={a.cardinality === "MULTI" ? values[a.name] ?? [] : values[a.name]?.[0] ?? ""}
               onChange={event => change(a.name, Array.from(event.target.selectedOptions).map(o => o.value).filter(Boolean))}>
               {a.cardinality === "SINGLE" ? <option value="">Choose a value</option> : null}
               {a.values.map(v => <option key={v.value} value={v.value} disabled={v.conditional}>{v.value}{v.conditional ? " (conditional; unsupported)" : ""}</option>)}
-            </select> : <textarea rows={a.cardinality === "MULTI" ? 3 : 1} disabled={!supported}
+            </select> : <textarea rows={a.cardinality === "MULTI" ? 3 : 1} disabled={!supported} aria-required={a.required}
               value={(values[a.name] ?? []).join("\n")} aria-describedby={`aspect-help-${requirements.aspects.indexOf(a)}`}
               onChange={event => change(a.name, event.target.value.split("\n"))} />}
             <small id={`aspect-help-${requirements.aspects.indexOf(a)}`}>{a.cardinality === "MULTI" ? "One value per line or selection; up to 30 values." : "One value."} Maximum {a.maxLength} characters per value.</small>
@@ -92,7 +97,7 @@ export function EbayPreparation({ listingId, version, connected, brand, model }:
     </fieldset>
     {pending ? <p role="status">Loading eBay metadata…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    {review ? <div className="panel" role="region" aria-label="eBay preparation review">
+    {review ? <div ref={reviewRegion} tabIndex={-1} className="panel" role="region" aria-label="eBay preparation review">
       <h3>Read-only eBay review</h3>
       <dl><dt>Environment</dt><dd>SANDBOX · EBAY_US · FIXED_PRICE</dd>
         <dt>Title</dt><dd>{review.title}</dd><dt>Description</dt><dd>{review.description}</dd>

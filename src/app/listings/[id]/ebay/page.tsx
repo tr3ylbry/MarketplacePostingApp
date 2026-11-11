@@ -19,10 +19,11 @@ export default async function EbayPreparationPage({ params }: { params: Promise<
     // Local persisted state only. No metadata/token/provider request on render.
     const status = await ebayService().status(user.id);
     const connected = status.state === "connected" || status.state === "expired";
-    return <><EbayPreparation listingId={id} version={listing.updatedAt} brand={listing.attributes.brand}
+    const reviewKey = id + ":" + listing.updatedAt + ":" + status.state + ":" + status.connectedAt;
+    return <><EbayPreparation key={reviewKey} listingId={id} version={listing.updatedAt} brand={listing.attributes.brand}
       model={listing.attributes.model} connected={connected} />
-      <EbaySellerReadiness listingId={id} version={listing.updatedAt} connected={connected} authorized={status.readinessAuthorized} />
-      <EbayPrivatePhotos key={id + ":" + listing.updatedAt} listingId={id} version={listing.updatedAt} connected={connected} photos={listing.images.map(image => ({ id: image.id, order: image.order,
+      <EbaySellerReadiness key={reviewKey} listingId={id} version={listing.updatedAt} connected={connected} authorized={status.readinessAuthorized} />
+      <EbayPrivatePhotos key={reviewKey} listingId={id} version={listing.updatedAt} connected={connected} photos={listing.images.map(image => ({ id: image.id, order: image.order,
         name: imageName(image), supported: image.source.kind === "vercel-blob" && ["image/jpeg", "image/png"].includes(image.source.contentType) }))} /></>;
   } catch (error) {
     return <section className="panel"><h2>eBay preparation — SANDBOX</h2><p role="alert">{safeEbayError(error)}</p><Link href="/settings/integrations/ebay">eBay connection settings</Link></section>;
