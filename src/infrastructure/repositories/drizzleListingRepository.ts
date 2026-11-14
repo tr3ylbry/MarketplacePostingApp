@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Listing } from "../../domain/listing";
 import { ListingConflictError, ListingUnavailableError, type ListingRepository } from "../../application/listingRepository";
@@ -6,6 +6,8 @@ import { ownerIdSchema, type OwnerId } from "../../application/owner";
 import * as schema from "../db/schema";
 import { listingFromRows, listingToRows } from "./listingMapping";
 import { immediateCleanupPaths, lockOwnedListing, queueCleanup } from "./drizzleImageRepository";
+import { INVENTORY_PAGE_SIZE, inventoryQuerySchema, type InventoryPage, type InventoryQuery } from "../../application/inventory";
+import { moneySchema } from "../../domain/money";
 
 type Database = NodePgDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -38,6 +40,33 @@ export class DrizzleListingRepository implements ListingRepository {
 
   list(ownerId: OwnerId) { return this.read(ownerId); }
   async getById(ownerId: OwnerId, id: string) { return (await this.read(ownerId, id))[0] ?? null; }
+
+  async listInventory(ownerId: OwnerId, input: InventoryQuery): Promise<InventoryPage> {
+    ownerIdSchema.parse(ownerId);
+    const { query, page: requestedPage } = inventoryQuerySchema.parse(input);
+    // Explicit ! escaping makes %, _ and ! literal; backslash is ordinary text.
+    const pattern = `%${query.replace(/[!%_]/g, "!$&")}%`;
+    const predicate = and(eq(listings.ownerId, ownerId), query ? sql`${listings.title} ilike ${pattern} escape '!'` : undefined);
+    return this.db.transaction(async tx => {
+      const [{ total }] = await tx.select({ total: count() }).from(listings).where(predicate);
+      if (!Number.isSafeInteger(total) || total < 0) throw new Error("Inventory count is unsupported.");
+      const totalPages = Math.max(1, Math.ceil(total / INVENTORY_PAGE_SIZE));
+      const page = Math.min(requestedPage, totalPages);
+      // OFFSET is derived only after the matching count clamps the validated request.
+      const rows = await tx.select({
+        id: listings.id, title: listings.title, askingPriceAmount: listings.askingPriceAmount, currency: listings.currency,
+        status: listings.status, condition: listings.condition, createdAt: listings.createdAt,
+        categoryLabel: sql<string>`coalesce(nullif(${listings.marketplaceDetails}->>'ebayCategory', ''),
+          nullif(${listings.marketplaceDetails}->>'offerupCategory', ''), nullif(${listings.marketplaceDetails}->>'facebookCategory', ''),
+          nullif(${listings.marketplaceDetails}->>'craigslistCategory', ''), nullif(${listings.marketplaceDetails}->>'reverbCategory', ''), 'No Category')`,
+      }).from(listings).where(predicate).orderBy(desc(listings.createdAt), asc(listings.id))
+        .limit(INVENTORY_PAGE_SIZE).offset((page - 1) * INVENTORY_PAGE_SIZE);
+      return { items: rows.map(row => ({ id: row.id, title: row.title,
+        askingPrice: moneySchema.parse({ amount: Number(row.askingPriceAmount), currency: row.currency }),
+        status: row.status, condition: row.condition, createdAt: new Date(row.createdAt).toISOString(), categoryLabel: row.categoryLabel,
+      })), query, page, pageSize: INVENTORY_PAGE_SIZE, totalPages, matchingCount: total };
+    }, { isolationLevel: "repeatable read", accessMode: "read only" });
+  }
 
   async create(ownerId: OwnerId, listing: Listing) {
     ownerIdSchema.parse(ownerId);

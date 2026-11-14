@@ -5,6 +5,7 @@ import { ListingConflictError, type ListingRepository } from "./listingRepositor
 import { ownerIdSchema, type OwnerId } from "./owner";
 import type { ImageStorage } from "./imageStorage";
 import { cleanupObjects } from "./imageService";
+import { inventoryQuerySchema } from "./inventory";
 
 const idSchema = z.string().trim().min(1).max(200);
 export const listingMutationSchema = listingInputSchema.extend({
@@ -14,6 +15,7 @@ export const listingMutationSchema = listingInputSchema.extend({
 export function createListingService(repository: ListingRepository, storage?: ImageStorage) {
   return {
     listListings: (ownerId: OwnerId) => repository.list(ownerIdSchema.parse(ownerId)),
+    listInventory: (ownerId: OwnerId, input: unknown) => repository.listInventory(ownerIdSchema.parse(ownerId), inventoryQuerySchema.parse(input)),
     getListing: (ownerId: OwnerId, id: string) => repository.getById(ownerIdSchema.parse(ownerId), idSchema.parse(id)),
     async createListing(ownerId: OwnerId, input: unknown) {
       ownerIdSchema.parse(ownerId);

@@ -1,5 +1,6 @@
 import type { Listing } from "../domain/listing";
 import type { OwnerId } from "./owner";
+import type { InventoryPage, InventoryQuery } from "./inventory";
 
 export class ListingConflictError extends Error {
   constructor() { super("This listing changed or was deleted. Reload before saving again."); }
@@ -10,6 +11,7 @@ export class ListingUnavailableError extends Error {
 
 export interface ListingRepository {
   list(ownerId: OwnerId): Promise<Listing[]>;
+  listInventory(ownerId: OwnerId, query: InventoryQuery): Promise<InventoryPage>;
   getById(ownerId: OwnerId, id: string): Promise<Listing | null>;
   create(ownerId: OwnerId, listing: Listing): Promise<Listing>;
   update(ownerId: OwnerId, listing: Listing, expectedUpdatedAt: string): Promise<Listing>;
