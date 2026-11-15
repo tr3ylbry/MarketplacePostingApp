@@ -5,7 +5,7 @@ const ownerId = "user-a";
 
 function setup() {
   const repository: ListingRepository = {
-    list: vi.fn().mockResolvedValue([]), getById: vi.fn().mockResolvedValue(null),
+    list: vi.fn().mockResolvedValue([]), listInventory: vi.fn(), getById: vi.fn().mockResolvedValue(null),
     create: vi.fn(async (_ownerId, value) => value), update: vi.fn(async (_ownerId, value) => value),
     delete: vi.fn().mockResolvedValue(undefined), importListings: vi.fn().mockResolvedValue({ imported: 1, skipped: 0 }),
   };
@@ -45,6 +45,16 @@ it("passes validated reads, deletion and imports to the repository", async () =>
   expect(repository.getById).toHaveBeenCalledWith(ownerId, "item");
   expect(repository.delete).toHaveBeenCalledWith(ownerId, "item");
   expect(await service.importListings(ownerId, [listingFixture()])).toEqual({ imported: 1, skipped: 0 });
+});
+it("validates inventory input and passes only the authenticated owner and normalized title/page", async () => {
+  const { repository, service } = setup();
+  await service.listInventory(ownerId, { query: "  guitar  ", page: 2 });
+  expect(repository.listInventory).toHaveBeenCalledWith(ownerId, { query: "guitar", page: 2 });
+  for (const input of [{ query: "x".repeat(101) }, { page: 0 }, { query: "bad\u0000title" }, { ownerId: "user-b" }]) {
+    expect(() => service.listInventory(ownerId, input)).toThrow();
+  }
+  expect(() => service.listInventory("", {})).toThrow();
+  expect(repository.listInventory).toHaveBeenCalledTimes(1);
 });
 it("rejects missing and migration-holder identities before persistence", async () => {
   const { repository, service } = setup();

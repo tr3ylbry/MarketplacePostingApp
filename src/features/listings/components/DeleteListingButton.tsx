@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { deleteListingAction } from "../../../app/listings/actions";
 
-export function DeleteListingButton({ id }: { id: string }) {
+export function DeleteListingButton({ id, stayOnPage = false }: { id: string; stayOnPage?: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,7 +13,8 @@ export function DeleteListingButton({ id }: { id: string }) {
     try {
       const result = await deleteListingAction(id);
       if (!result.ok) { setError(result.error); return; }
-      router.push("/listings"); router.refresh();
+      if (!stayOnPage) router.push("/listings");
+      router.refresh();
     } catch { setError("Could not delete the listing. Try again."); }
     finally { setPending(false); }
   }

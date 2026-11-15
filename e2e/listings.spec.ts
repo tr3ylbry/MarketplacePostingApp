@@ -300,10 +300,10 @@ test("explicit local import persists and repeated import skips existing records"
   await page.reload();
   await expect(page.getByRole("link", { name: listing.title, exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Import local listings" }).click();
-  await expect(page.getByRole("status")).toContainText("Imported 1; skipped 0");
+  await expect(page.getByRole("status").filter({ hasText: "Imported" })).toContainText("Imported 1; skipped 0");
   await page.reload();
   await expect(page.getByRole("link", { name: listing.title, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Import local listings" }).click();
-  await expect(page.getByRole("status")).toContainText("Imported 0; skipped 1");
+  await expect(page.getByRole("status").filter({ hasText: "Imported" })).toContainText("Imported 0; skipped 1");
   expect(await page.evaluate(() => localStorage.getItem("marketplace-posting-assistant:listings:v2"))).toContain(listing.id);
 });
