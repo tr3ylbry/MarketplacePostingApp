@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { z } from "zod";
 import { validEbayScopes } from "../../application/ebayConnection";
@@ -64,20 +64,25 @@ export class DrizzleEbayRealMediaRepository {
         const [fenced] = await tx.select({ id: attempts.id }).from(attempts).where(and(eq(attempts.ownerId, value.ownerId),
           eq(attempts.listingId, value.listingId), eq(attempts.imageId, value.imageId), isNotNull(attempts.postIntentAt))).limit(1);
         if (fenced) throw new RealMediaError("blocked");
+        const [consumed] = await tx.select({ id: attempts.id }).from(attempts).where(and(eq(attempts.ownerId, value.ownerId), eq(attempts.actionHash, value.actionHash))).limit(1);
+        if (consumed) throw new RealMediaError("blocked");
         const [previous] = await tx.select().from(attempts).where(and(eq(attempts.ownerId, value.ownerId),
-          or(eq(attempts.actionHash, value.actionHash), and(eq(attempts.listingId, value.listingId), eq(attempts.imageId, value.imageId), eq(attempts.state, "preparing"))))).for("update");
-        if (previous && (previous.listingId !== value.listingId || previous.imageId !== value.imageId || previous.postIntentAt || previous.state !== "preparing" || !previous.leaseUntil || Date.parse(previous.leaseUntil) > now.getTime())) throw new RealMediaError("blocked");
+          eq(attempts.listingId, value.listingId), eq(attempts.imageId, value.imageId), eq(attempts.state, "preparing"))).for("update");
+        if (previous) {
+          if (previous.postIntentAt || !previous.leaseUntil || Date.parse(previous.leaseUntil) > now.getTime()) throw new RealMediaError("blocked");
+          // Retire the expired lease without releasing its consumed action binding.
+          // The fresh action gets a new row; both changes commit or roll back together.
+          const [retired] = await tx.update(attempts).set({ state: "not-sent", reason: "preparation", leaseUntil: null,
+            revision: previous.revision + 1, updatedAt: now.toISOString() }).where(and(eq(attempts.id, previous.id),
+            eq(attempts.revision, previous.revision), eq(attempts.claimHash, previous.claimHash), isNull(attempts.postIntentAt))).returning({ id: attempts.id });
+          if (!retired) throw new RealMediaError("blocked");
+        }
         const values = { ...value, listingVersion: current.listingVersion, connectionId: current.connectionId, connectionVersion: current.connectionVersion,
           configHash: current.configHash, grantHash: current.grantHash, sellerKey: current.sellerKey, sourceVersion: current.sourceVersion, imageOrder: current.imageOrder,
-          id: previous?.id ?? randomUUID(), environment: "sandbox", state: "preparing",
-          revision: previous ? previous.revision + 1 : 0, claimHash: realMediaDigest(token),
+          id: randomUUID(), environment: "sandbox", state: "preparing",
+          revision: 0, claimHash: realMediaDigest(token),
           leaseUntil: new Date(now.getTime() + REAL_MEDIA_LEASE_MS).toISOString(), updatedAt: now.toISOString() };
-        let row: Attempt;
-        if (previous) {
-          const [changed] = await tx.update(attempts).set(values).where(and(eq(attempts.id, previous.id), eq(attempts.revision, previous.revision),
-            eq(attempts.claimHash, previous.claimHash), isNull(attempts.postIntentAt))).returning();
-          if (!changed) throw new RealMediaError("blocked"); row = changed;
-        } else [row] = await tx.insert(attempts).values({ ...values, createdAt: now.toISOString() }).returning();
+        const [row] = await tx.insert(attempts).values({ ...values, createdAt: now.toISOString() }).returning();
         await tx.update(schema.listingImages).set({ providerRetainUntil: sql`greatest(${schema.listingImages.providerRetainUntil}, ${new Date(now.getTime() + PRIVATE_IMAGE_REVIEW_MS + CLEANUP_GRACE_MS).toISOString()}::timestamptz)` }).where(eq(schema.listingImages.id, value.imageId));
         return { id: row.id, ownerId: row.ownerId, listingId: row.listingId, imageId: row.imageId, token, revision: row.revision, sessionHash: row.sessionHash, actionHash: row.actionHash };
       });

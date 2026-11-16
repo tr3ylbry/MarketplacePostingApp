@@ -77,9 +77,12 @@ it("serializes concurrent claims and returns only a generic blocked result to th
 });
 it("reclaims only an expired unfenced lease and rejects stale token/revision/session/action", async () => {
   const old = await claim(); now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
-  const fresh = await claim(); expect(fresh.id).toBe(old.id); expect(fresh.revision).toBe(old.revision + 1);
+  const fresh = await claim(); expect(fresh.id).not.toBe(old.id); expect(fresh.revision).toBe(0);
+  expect(await record(old.id)).toMatchObject({ state: "not-sent", revision: old.revision + 1, actionHash: old.actionHash, postIntentAt: null });
   await expect(repository.fence(old, content())).rejects.toMatchObject({ code: "stale" });
-  for (const altered of [{ ...fresh, revision: old.revision }, { ...fresh, token: randomUUID() }, { ...fresh, sessionHash: realMediaDigest("other") }, { ...fresh, actionHash: realMediaDigest("other") }])
+  await expect(repository.notSent(old)).rejects.toMatchObject({ code: "stale" });
+  await expect(repository.acknowledge(old, {})).rejects.toMatchObject({ code: "stale" });
+  for (const altered of [{ ...fresh, revision: fresh.revision + 1 }, { ...fresh, token: old.token }, { ...fresh, sessionHash: realMediaDigest("other") }, { ...fresh, actionHash: old.actionHash }])
     await expect(repository.fence(altered, content())).rejects.toMatchObject({ code: "stale" });
   expect((await repository.fence(fresh, content())).revision).toBe(fresh.revision + 1);
 });
@@ -90,7 +93,9 @@ it("allows a new explicit action after not-sent, never reuses the consumed actio
 });
 it("recovers a lost claim acknowledgement after lease expiry without a send intent", async () => {
   const first = await claim(); now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
-  const next = await claim(); expect(next.id).toBe(first.id); expect((await record(next.id)).postIntentAt).toBeNull();
+  const next = await claim(); expect(next.id).not.toBe(first.id); expect((await record(next.id)).postIntentAt).toBeNull();
+  expect(await record(first.id)).toMatchObject({ state: "not-sent", actionHash: first.actionHash, postIntentAt: null });
+  await expect(claim({ actionHash: first.actionHash, imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
 });
 it("rolls back a failed fence transaction and never allows notSent to undo an ambiguously committed fence", async () => {
   const c = await claim(), transaction = db.transaction.bind(db);
@@ -276,4 +281,91 @@ it.each(["image", "listing"])("preserves the existing physical retention/cleanup
   expect(storage.objects.has(source.pathname)).toBe(false); expect(storage.objects.has(otherSource.pathname)).toBe(true);
   expect(await receiptRows(c.id)).toHaveLength(1); expect((await record(c.id)).postIntentAt).not.toBeNull();
   expect(await listings.getById(foreign, other.id)).not.toBeNull();
+});
+it("retains consumed action A after fresh action B reclaims its expired photo", async () => {
+  const actionA = await request(), old = await repository.claim(actionA);
+  now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  const replacement = await claim();
+  await expect(repository.claim({ ...actionA, imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
+  await expect(repository.claim(actionA)).rejects.toMatchObject({ code: "blocked" });
+  expect((await record(old.id)).actionHash).toBe(actionA.actionHash);
+  expect(replacement.id).not.toBe(old.id);
+});
+it("requires a fresh action even when the original unfenced lease expires", async () => {
+  const value = await request(), first = await repository.claim(value);
+  now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1); const before = await record(first.id);
+  await expect(repository.claim(value)).rejects.toMatchObject({ code: "blocked" });
+  expect(await record(first.id)).toEqual(before);
+  expect((await claim()).id).not.toBe(first.id);
+});
+it("preserves every consumed binding across successive reclamations and rejects all retired workers", async () => {
+  const requests = [], claims: RealMediaClaim[] = [];
+  for (let i = 0; i < 4; i++) {
+    const value = await request(); requests.push(value); claims.push(await repository.claim(value));
+    if (i < 3) now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  }
+  expect(new Set(claims.map(c => c.id)).size).toBe(4);
+  const latest = claims[3], before = await record(latest.id);
+  for (let i = 0; i < 3; i++) {
+    const old = claims[i], retired = await record(old.id);
+    expect(retired).toMatchObject({ state: "not-sent", actionHash: requests[i].actionHash, sessionHash: requests[i].sessionHash,
+      claimHash: realMediaDigest(old.token), revision: old.revision + 1, leaseUntil: null, postIntentAt: null });
+    await expect(repository.claim(requests[i])).rejects.toMatchObject({ code: "blocked" });
+    await expect(repository.claim({ ...requests[i], imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
+    for (const stale of [old, { ...old, revision: retired.revision }, { ...latest, token: old.token }, { ...latest, actionHash: old.actionHash }]) {
+      await expect(repository.fence(stale, content())).rejects.toMatchObject({ code: "stale" });
+      await expect(repository.notSent(stale)).rejects.toMatchObject({ code: "stale" });
+      await expect(repository.acknowledge(stale, {})).rejects.toMatchObject({ code: "stale" });
+    }
+  }
+  expect(await record(latest.id)).toEqual(before);
+  const fenced = await repository.fence(latest, content()), p = await proof(fenced);
+  expect(await repository.acknowledge(fenced, p)).toEqual({ state: "confirmed", associated: true });
+  expect(await repository.acknowledge(fenced, p)).toEqual({ state: "confirmed", associated: true });
+  expect(await receiptRows(fenced.id)).toHaveLength(1);
+});
+it("allows only one fresh concurrent replacement while preserving the retired action", async () => {
+  const original = await claim(); now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  const values = [await request(), await request()];
+  const results = await Promise.allSettled(values.map(value => repository.claim(value)));
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  expect((results.find(r => r.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ code: "blocked" });
+  const rows = await db.select().from(a).where(eq(a.ownerId, owner));
+  expect(rows).toHaveLength(2); expect(rows.filter(r => r.state === "preparing")).toHaveLength(1);
+  expect(await record(original.id)).toMatchObject({ state: "not-sent", actionHash: original.actionHash });
+  await expect(claim({ actionHash: original.actionHash, imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
+  const loser = values[results.findIndex(r => r.status === "rejected")];
+  expect(await repository.claim({ ...loser, imageId: secondImage })).toHaveProperty("actionHash", loser.actionHash);
+});
+it.each([false, true])("rejects a replay racing a fresh reclamation in either call order (%s)", async replayFirst => {
+  const actionA = await request(), original = await repository.claim(actionA);
+  now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  const fresh = await request(), replay = { ...actionA, imageId: secondImage };
+  const values = replayFirst ? [replay, fresh] : [fresh, replay];
+  const results = await Promise.allSettled(values.map(value => repository.claim(value)));
+  expect(results[replayFirst ? 0 : 1]).toMatchObject({ status: "rejected", reason: { code: "blocked" } });
+  expect(results[replayFirst ? 1 : 0].status).toBe("fulfilled");
+  expect(await record(original.id)).toMatchObject({ actionHash: actionA.actionHash, state: "not-sent" });
+});
+it("consumes a concurrent fresh action for only one photo and retains the earlier action", async () => {
+  const original = await claim(); now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  const actionB = await request();
+  const results = await Promise.allSettled([repository.claim(actionB), repository.claim({ ...actionB, imageId: secondImage })]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  expect((results.find(r => r.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ code: "blocked" });
+  for (const photo of [imageId, secondImage]) await expect(repository.claim({ ...actionB, imageId: photo })).rejects.toMatchObject({ code: "blocked" });
+  expect((await record(original.id)).actionHash).toBe(original.actionHash);
+  await expect(claim({ actionHash: original.actionHash, imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
+});
+it("rolls retirement and replacement back together if the claim commit fails", async () => {
+  const original = await claim(); now = new Date(now.getTime() + REAL_MEDIA_LEASE_MS + 1);
+  const before = await record(original.id), [photoBefore] = await db.select().from(schema.listingImages).where(eq(schema.listingImages.id, imageId));
+  const value = await request(), transaction = db.transaction.bind(db);
+  const fault = vi.spyOn(db, "transaction").mockImplementationOnce(callback => transaction(async tx => { await callback(tx); throw new Error("Injected claim commit failure"); }));
+  await expect(repository.claim(value)).rejects.toMatchObject({ code: "unavailable" }); fault.mockRestore();
+  expect(await record(original.id)).toEqual(before);
+  expect(await db.select().from(a).where(eq(a.ownerId, owner))).toHaveLength(1);
+  const [photoAfter] = await db.select().from(schema.listingImages).where(eq(schema.listingImages.id, imageId)); expect(photoAfter).toEqual(photoBefore);
+  expect((await repository.claim(value)).id).not.toBe(original.id);
+  await expect(claim({ actionHash: original.actionHash, imageId: secondImage })).rejects.toMatchObject({ code: "blocked" });
 });
