@@ -1,6 +1,6 @@
 # Offline photo-export review
 
-Reviewed 2026-11-16 against PR #15 merge `c74b0caf45284756da97c8978fb43921892a65ec`. **Research and proposed decisions only:** no production sanitizer, real transport, scope change or provider operation was added. [The privacy policy](photo-export-privacy.md) remains unapproved; Stage 9B remains In Progress.
+Historical offline review, 2026-11-16, against PR #15 merge `c74b0caf45284756da97c8978fb43921892a65ec`. That research added no sanitizer, real transport, scope change or provider operation. The later owner decision accepts the [local privacy defaults](photo-export-privacy.md), now implemented behind a [separate internal boundary](photo-derivatives.md). The measurements/recommendations below retain their original research context; real provider behavior and transport authorization remain pending. Stage 9B remains In Progress.
 
 ## Evidence and method
 
