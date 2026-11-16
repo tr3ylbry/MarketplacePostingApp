@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
-import { prepareEbayPrivateImageAction } from "../../app/listings/[id]/ebay/actions";
+import { prepareEbayPrivateImageAction, simulateEbayMediaAction } from "../../app/listings/[id]/ebay/actions";
 import type { PrivateImageReview } from "../../application/ebayPrivateImageService";
 
 export interface PrivatePhotoSummary { id: string; order: number; name: string; supported: boolean }
-export function EbayPrivatePhotos({ listingId, version, photos, connected }: { listingId: string; version: string; photos: PrivatePhotoSummary[]; connected: boolean }) {
+export function EbayPrivatePhotos({ listingId, version, photos, connected, simulationAvailable = false }: { listingId: string; version: string; photos: PrivatePhotoSummary[]; connected: boolean; simulationAvailable?: boolean }) {
   const [hydrated, setHydrated] = useState(false), [busy, start] = useTransition();
   const [reviews, setReviews] = useState<Record<string, PrivateImageReview>>({}), [error, setError] = useState("");
+  const [simulation, setSimulation] = useState("");
   const [now, setNow] = useState(Date.now);
   useEffect(() => setHydrated(true), []);
   useEffect(() => {
@@ -28,9 +29,20 @@ export function EbayPrivatePhotos({ listingId, version, photos, connected }: { l
         catch { setError("Private photo preparation could not be completed."); }
       })}>Validate photo {photo.order + 1}</button>
       {connected && reviews[photo.id] ? <p role="status">{Date.parse(reviews[photo.id].expiresAt) > now ? <>Photo verified for local export review: {reviews[photo.id].width} × {reviews[photo.id].height} pixels · {reviews[photo.id].size} bytes. Export not attempted.</> : "Photo review expired. Validate this photo again."} Revalidate after changes or before any future transfer.</p> : null}
+      {simulationAvailable ? <button disabled={!hydrated || busy || !connected || !photo.supported} onClick={() => start(async () => {
+        setError(""); setSimulation("");
+        try {
+          const result = await simulateEbayMediaAction(listingId, version, photo.id);
+          if (!result.ok) { setError(result.error); return; }
+          setSimulation(result.data.state === "confirmed" ? "Simulated response recorded. No real eBay transfer occurred; another POST is blocked."
+            : "Simulation requires operator review. Another POST is blocked; no real eBay transfer occurred.");
+        } catch { setError("Photo simulation could not be completed."); }
+      })}>Simulate media attempt for photo {photo.order + 1}</button> : null}
     </li>)}</ol>}
     {busy ? <p role="status">Validating private photo…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
+    {simulationAvailable ? <p>Isolated test only: sends a generated fixture to a loopback fake, not your private photo to eBay.</p> : null}
+    {simulation ? <p role="status">{simulation}</p> : null}
     <button disabled>Upload to eBay — unavailable</button>
     <p>Sending photos to eBay is not available yet. Its test photo-upload behavior and photo-privacy requirements must be verified first. Validating a photo only checks the local private copy; it does not request additional seller permissions.</p>
   </section>;

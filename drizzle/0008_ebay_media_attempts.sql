@@ -1,0 +1,41 @@
+CREATE TABLE "ebay_media_attempts" (
+	"id" text PRIMARY KEY NOT NULL,
+	"owner_id" text NOT NULL,
+	"environment" text DEFAULT 'sandbox' NOT NULL,
+	"simulation" boolean DEFAULT true NOT NULL,
+	"seller_id" text NOT NULL,
+	"listing_id" text NOT NULL,
+	"image_id" text NOT NULL,
+	"listing_version" timestamp(3) with time zone NOT NULL,
+	"connection_id" text NOT NULL,
+	"connection_version" text NOT NULL,
+	"config_hash" text NOT NULL,
+	"source_metadata_hash" text NOT NULL,
+	"source_digest" text,
+	"export_digest" text,
+	"transformation_version" text NOT NULL,
+	"export_size" integer,
+	"state" text NOT NULL,
+	"lease_token" text NOT NULL,
+	"lease_until" timestamp(3) with time zone,
+	"post_attempted_at" timestamp(3) with time zone,
+	"returned_image_id" text,
+	"image_url" text,
+	"expires_at" timestamp(3) with time zone,
+	"response_status" integer,
+	"reason" text,
+	"created_at" timestamp(3) with time zone NOT NULL,
+	"updated_at" timestamp(3) with time zone NOT NULL,
+	CONSTRAINT "ebay_media_simulation_only" CHECK ("ebay_media_attempts"."environment" = 'sandbox' AND "ebay_media_attempts"."simulation" = true),
+	CONSTRAINT "ebay_media_state" CHECK ("ebay_media_attempts"."state" IN ('preparing','not-sent','unknown','confirmed','residual')),
+	CONSTRAINT "ebay_media_recipe" CHECK ("ebay_media_attempts"."transformation_version" = 'generated-fixture-v1'),
+	CONSTRAINT "ebay_media_fence" CHECK (("ebay_media_attempts"."state" IN ('preparing','not-sent') AND "ebay_media_attempts"."post_attempted_at" IS NULL) OR ("ebay_media_attempts"."state" IN ('unknown','confirmed','residual') AND "ebay_media_attempts"."post_attempted_at" IS NOT NULL AND "ebay_media_attempts"."source_digest" IS NOT NULL AND "ebay_media_attempts"."export_digest" IS NOT NULL)),
+	CONSTRAINT "ebay_media_confirmed" CHECK ("ebay_media_attempts"."state" NOT IN ('confirmed','residual') OR ("ebay_media_attempts"."returned_image_id" IS NOT NULL AND "ebay_media_attempts"."image_url" IS NOT NULL AND "ebay_media_attempts"."expires_at" IS NOT NULL)),
+	CONSTRAINT "ebay_media_size" CHECK ("ebay_media_attempts"."export_size" IS NULL OR ("ebay_media_attempts"."export_size" > 0 AND "ebay_media_attempts"."export_size" <= 1048576)),
+	CONSTRAINT "ebay_media_digest" CHECK ("ebay_media_attempts"."source_metadata_hash" ~ '^[a-f0-9]{64}$' AND ("ebay_media_attempts"."source_digest" IS NULL OR "ebay_media_attempts"."source_digest" ~ '^[a-f0-9]{64}$') AND ("ebay_media_attempts"."export_digest" IS NULL OR "ebay_media_attempts"."export_digest" ~ '^[a-f0-9]{64}$')),
+	CONSTRAINT "ebay_media_fixture_identity" CHECK (("ebay_media_attempts"."returned_image_id" IS NULL OR "ebay_media_attempts"."returned_image_id" ~ '^fake_[a-f0-9]{32}$') AND ("ebay_media_attempts"."image_url" IS NULL OR "ebay_media_attempts"."image_url" ~ '^http://127[.]0[.]0[.]1:4313/eps/fake_[a-f0-9]{32}[.]png$'))
+);
+--> statement-breakpoint
+ALTER TABLE "ebay_media_attempts" ADD CONSTRAINT "ebay_media_attempts_owner_id_users_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "ebay_media_source_fence_idx" ON "ebay_media_attempts" USING btree ("owner_id","environment","seller_id","image_id");--> statement-breakpoint
+CREATE INDEX "ebay_media_owner_idx" ON "ebay_media_attempts" USING btree ("owner_id","created_at");

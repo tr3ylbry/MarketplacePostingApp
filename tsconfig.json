@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "paths": {
+      "@ebay-media": ["./src/infrastructure/ebay/mediaRuntime.ts"],
       "@ebay-readiness": ["./src/infrastructure/ebay/readinessGateway.ts"],
       "@ebay-metadata": ["./src/infrastructure/ebay/metadataGateway.ts"],
       "@ebay-runtime": ["./src/infrastructure/ebay/runtime.ts"],
