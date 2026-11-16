@@ -1,6 +1,6 @@
 # Proposed real Sandbox media records and transfer
 
-Design for review, 2026-11-16, against merged development baseline `b04159870a030d070b6d757c4187979feb92f69e`. **Documentation only; no real uploader, write authorization profile, real records or migration is implemented by this document.** Stage 9B remains In Progress; real EPS stays hard-disabled. The next implementation requires separate approval. Inventory, offers, publication, remote attachment, background synchronization and generic HTTP proxying are excluded.
+Reviewed design, 2026-11-16, against development baseline `b04159870a030d070b6d757c4187979feb92f69e`. The separately authorized [persistence-only slice](ebay-real-media-persistence.md) now implements records, guarded transitions and a disposable-tested migration. The rest remains proposed: **no real uploader, media authorization profile, orchestration, real URL admission or provider acceptance is implemented.** Stage 9B remains In Progress; real EPS stays hard-disabled. The next implementation requires separate approval. Inventory, offers, publication, remote attachment, background synchronization and generic HTTP proxying are excluded.
 
 ## Evidence and current boundary
 

@@ -1,0 +1,62 @@
+# Real media persistence foundation — transport disabled
+
+This implements only the first slice of the [reviewed real-media design](ebay-real-media-design.md): bounded records, repository transitions and SQL protections. It does not create an EPS resource or establish real response/URL admission. The existing simulation table, recipe, constraints, fake transport and runtime composition are unchanged. **Real EPS stays hard-disabled; Stage 9B remains In Progress.** No route, server action, upload UI, OAuth media profile, provider client or background job is added.
+
+## Records and binding
+
+Committed migration `0009_ebay_real_media` adds three distinct tables:
+
+| Table | Purpose |
+| --- | --- |
+| `ebay_real_media_attempts` | Owned Sandbox context, stable seller/identity version, session/action hashes, exact listing/image/order/source snapshot, connection/config/grant versions, recipe, separate source/final-derivative identities, bounded output properties, revision/claim lease and immutable send intent |
+| `ebay_real_media_receipts` | Append-only normalized, contract-versioned partial/complete/conflicting evidence with a fingerprint for idempotent local acknowledgement |
+| `ebay_real_media_associations` | Current local image-to-receipt binding, guarded by SQL and repository freshness checks; no Inventory/offer/publication attachment |
+
+The [repository](../src/infrastructure/repositories/drizzleEbayRealMediaRepository.ts) performs PostgreSQL operations only. Owner and session/action context must eventually come from trusted authenticated orchestration; no browser entry point exists. Claim capabilities remain internal. Public-facing summaries contain only `state` and `associated`, never a lease token, digest, seller key, URL or credential.
+
+Source version is a SQL-computed SHA-256 of the exact persisted source-metadata tuple, with upload time represented as epoch; the raw pathname/filename is not copied into evidence. A separate grant fingerprint binds the persisted scope array. Actual source/derivative byte digests and the recipe come from the trusted future derivative caller; the repository validates their shape and context, **not image pixels or a claimed provider send**. Source bytes/native processing are not part of this persistence slice.
+
+No image bytes, credentials, raw metadata/response, private path, original filename or signed capability is stored. Current identity/readiness scope guards remain exact; a future media grant requires its own reviewed compatibility change. Persisting an intent is not permission to upload.
+
+## Claims, fences and outcomes
+
+- Claims serialize under the existing owned parent/connection/image lock order. One `preparing` claim is active per owned photo. An expired **unfenced** claim can be replaced using revision and claim-hash CAS; old tokens/session/action bindings cannot fence. An action cannot move to another image.
+- Claims commit max source retention through the existing five-minute preparation window plus one-minute margin. No storage, HTTP, OAuth or native operation runs in a transaction. Longer holds are preserved.
+- `fence` revalidates the latest parent/source/order/connection/grant, recipe and MIME before atomically storing the byte identities and send intent. Independent partial unique indexes bind `(Sandbox, seller, sourceDigest)` and `(Sandbox, seller, derivativeDigest)` once intent exists. Owner, image ID, connection and recipe are deliberately absent from these keys. New IDs/recipes/connections/owners cannot bypass a prior same-seller content fence; foreign conflicts are generic.
+- A definitive pre-fence failure may become `not-sent`; another explicit action can claim again. A lost fence acknowledgement, crash or expired lease cannot clear a committed fence. No reset/purge/fence-release API exists.
+- Compatible partial evidence remains `unknown`. A complete, nonconflicting, unexpired receipt can become `confirmed` and associated only for fresh matching bindings. Complete stale/capture-only outcomes are `residual`. Contradictory receipts remain append-only, invalidate the association and keep uncertainty. No later reply overwrites earlier evidence.
+- Identical receipt acknowledgement is locally idempotent, including after a lost commit acknowledgement. A late response can record evidence without reopening a send lease; fresh association checks still apply. Repeating a DB acknowledgement is never a provider retry.
+- `status` is owner-scoped and revalidates current bindings/expiry. A projection can become stale after an edit/reorder/disconnect; callers must use this guarded read rather than treat a raw association row as authorization. Stale confirmed state becomes residual and its association is removed. No background checks or provider calls occur.
+
+## SQL protections and deletion
+
+SQL triggers prevent changes to fenced bindings/content/send intent, fenced row deletion, receipt updates/deletion, and evidence-table truncation. Revisions must advance; complete states require receipt evidence. Association inserts/updates independently require the same owned source/listing/order, seller/connection/config/grant, complete nonconflicting receipt and future expiry with a 60-second safety margin. Composite foreign keys reject foreign-owner or wrong-attempt receipt bindings.
+
+Only the current product association cascades with image/listing/connection deletion. Attempts, receipts and content fences do not. Normal image/listing deletion continues to use the existing retention-aware cleanup ledger; tests verify sources survive until due and unrelated objects remain untouched.
+
+Owner references use **RESTRICT**. No account deletion/offboarding UI, evidence expiry or indefinite legal-retention policy is authorized. Minimal pseudonymous context/digests and receipt evidence remain until a separately reviewed offboarding policy exists. These are application/SQL safeguards, not protection against a database administrator changing DDL or disabling triggers. Test cleanup never disables protections or purges fenced rows.
+
+## Response admission is closed
+
+The [admission module](../src/infrastructure/ebay/realMediaEvidence.ts) has no real Location/EPS grammar: real admission always fails closed. A caller-supplied `validated` boolean, matching JSON shape, arbitrary URL or serialized proof cannot authorize acknowledgement.
+
+The only current contract is explicitly `synthetic-real-media-v1`. It validates fixed `.invalid.test` fixture URLs independent of existing simulation URL grammar. Its opaque in-memory proof binds the actual database, owner and attempt. Issuance/use requires the test environment and an actual database named `marketplace_real_media_<24 hex characters>_test`; Vercel is rejected. SQL separately restricts synthetic receipt admission to that exact disposable-database namespace. Normal databases cannot admit these receipts. This is no runtime switch to a real contract: future real admission requires reviewed parser/URL rules and a migration extending the deliberately closed SQL contract.
+
+Tests deliberately use different resource and visual IDs, so fake identity equality does not become a real EPS assumption. Only independently valid fields are retained. Malformed/ambiguous fields do not become usable associations. Unknown real URLs, authentication, redirects, precise limits/color/alpha, recovery and expiry semantics remain unresolved.
+
+## Reproducible verification
+
+Run normal repository checks with the documented dedicated local `TEST_DATABASE_URL`. The new integration suite requires the test role to have `CREATEDB` (as the existing Compose/CI PostgreSQL owner does). It validates the parent URL/database identity, creates one uniquely named **disposable child database**, applies all committed migrations, tests repeat migration, and drops that database after closing its pool. Existing development tables/data are never used for teardown. If that isolation cannot be established, the suite fails instead of weakening immutability or targeting another database.
+
+Focused commands:
+
+```sh
+npx vitest run src/infrastructure/ebay/realMediaEvidence.test.ts
+npx vitest run --config vitest.integration.config.ts src/infrastructure/repositories/ebayRealMedia.integration.test.ts
+```
+
+Coverage includes concurrent claims/content conflicts, expired leases/stale workers, cross-owner/seller isolation, recipe/reconnect/ID bypass attempts, fence and receipt commit failures, partial/conflicting/expired/late evidence, safe summaries, parent deletion/reorder/version races, normal retained-source cleanup, owner RESTRICT, direct SQL immutability and unchanged simulation constraints. All records/storage are synthetic; no provider or token operation occurs. Exact suite/CI counts belong in the implementation PR. The migration is committed and tested in disposable infrastructure; this work does not apply it to the development database.
+
+## Remaining gates and next slice
+
+Review this persistence implementation first. The smallest next slice is separately authorized **fake-only grant/review/orchestration integration**: precise media-profile/session binding, current scope-guard compatibility, accepted derivative composition, full-operation capacity and fresh pre-send/ack checks, with no real transport. Real URL/expiry/egress rules, broader consent, resource/client limits, owner offboarding and controlled acceptance/discovery remain separate decisions. Keep the [normal versus capture-only plans](ebay-real-media-design.md#later-bounded-normal-acceptance--separate-approval-required) proposed and unexecuted. No real record here establishes ingestion, recovery, remote erasure or publishing eligibility.
