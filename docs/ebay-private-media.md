@@ -34,7 +34,11 @@ An image/listing still disappears from the application immediately. The existing
 
 The original preparation slice added no schema. The simulation foundation adds `ebay_media_attempts`: an owner/seller/source-bound attempt and response journal, explicitly marked simulation-only. Temporary photo validation is still not an EPS export. Attempt rows intentionally do not cascade with listing/image/connection deletion; they preserve uncertainty and residual evidence. No real association is created.
 
-The UI marks temporary photo reviews expired when their deadline passes; this is a local timer, not polling or renewed export permission. Updated listing/connection state resets temporary preparation. [The isolated walkthrough](isolated-walkthrough.md) reproduces this workflow without real provider access. [The proposed photo-export privacy policy](photo-export-privacy.md) defines a future separate derivative, orientation/color handling and acceptance cases; it does not add sanitization to current bytes.
+The UI marks temporary photo reviews expired when their deadline passes; this is a local timer, not polling or renewed export permission. Updated listing/connection state resets temporary preparation. [The isolated walkthrough](isolated-walkthrough.md) reproduces this workflow without real provider access. The [accepted local photo-export policy](photo-export-privacy.md) belongs to the separate internal boundary below; it does not change this validation action's bytes or DTO.
+
+## Separate internal derivative boundary
+
+The owner has accepted the [local privacy defaults](photo-export-privacy.md), implemented by a [server-only internal boundary](photo-derivatives.md). It preserves sources, classifies narrow metadata/orientation/profile forms, produces Q95/4:4:4 JPEG or adaptive lossless PNG without pHYs, verifies exact final bytes and returns distinct source/derivative identities internally. It has no new action, route, export UI or provider consumer. **Validate photo N**, existing simulation fixtures/constraints, reads, bundles and Reverb behavior remain unchanged. Real media transport remains hard-disabled; local derivatives do not establish real EPS acceptance or a send grant.
 
 ## Contract reconciliation — reviewed 2026-11-16
 
