@@ -3,11 +3,13 @@ import { randomUUID } from "node:crypto";
 import { metadataFixture } from "../src/test/ebay/metadataFixtures";
 import { readinessFixture } from "../src/test/ebay/readinessFixtures";
 import { EBAY_SCOPES, EBAY_READINESS_SCOPES } from "../src/application/ebayConnection";
+import { mediaFixture } from "../src/test/ebay/mediaFixture";
 if(process.env.MARKETPLACE_TEST_BUILD!=="1"||process.env.VERCEL||!process.env.TEST_EBAY_SECRET)throw new Error("Isolated eBay tests required.");
 const access=new Map<string,string>(),refresh=new Map<string,string>();
 let exchanges=0,refreshes=0,identities=0;
 let applicationTokens=0,metadataReads=0;
 let readinessReads=0,mutations=0;
+let mediaPosts=0,mediaAccepted=0,mediaGets=0;
 const applications=new Set<string>();
 const scopes=new Map<string,readonly string[]>();
 createServer(async(req,res)=>{
@@ -15,7 +17,23 @@ createServer(async(req,res)=>{
   const send=(body:unknown,status=200)=>{res.writeHead(status,{"Content-Type":"application/json"});res.end(JSON.stringify(body));};
   if(path==="/health")return send({ok:true});
   if(req.headers["x-test-secret"]!==process.env.TEST_EBAY_SECRET)return send({},403);
-  if(path==="/stats")return send({exchanges,refreshes,identities,applicationTokens,metadataReads,readinessReads,mutations});
+  if(path==="/stats")return send({exchanges,refreshes,identities,applicationTokens,metadataReads,readinessReads,mutations,mediaPosts,mediaAccepted,mediaGets});
+  if(path.startsWith("/commerce/media/v1_beta/image/")&&req.method==="GET"){mediaGets++;return send({},405);}
+  if(path==="/commerce/media/v1_beta/image/create_image_from_file"&&req.method==="POST"){
+    mediaPosts++;
+    try{
+      const chunks:Buffer[]=[];let length=0;
+      for await(const chunk of req){length+=chunk.length;if(length>1024*1024+2048)return send({},413);chunks.push(Buffer.from(chunk));}
+      const request=new Request("http://127.0.0.1:4313"+path,{method:"POST",headers:{"Content-Type":String(req.headers["content-type"])},body:Buffer.concat(chunks)});
+      const form=await request.formData(),image=form.get("image");
+      if([...form.keys()].length!==1||!(image instanceof File)||image.name!=="fixture.png"||image.type!=="image/png"||image.size>1024*1024)return send({},400);
+      const bytes=Buffer.from(await image.arrayBuffer());
+      if(!bytes.equals(await mediaFixture.create(AbortSignal.timeout(10000))))return send({},400);
+      const id="fake_"+randomUUID().replace(/-/g,"");mediaAccepted++;
+      res.setHeader("Location","http://127.0.0.1:4313/commerce/media/v1_beta/image/"+id);
+      return send({imageUrl:"http://127.0.0.1:4313/eps/"+id+".png",expirationDate:new Date(Date.now()+600000).toISOString()},201);
+    }catch{return send({},400);}
+  }
   if(req.method==="GET"){
     if(path.startsWith("/sell/account/v1/")||path==="/sell/inventory/v1/location"){
       const token=String(req.headers.authorization).replace(/^Bearer /,""),seller=access.get(token);

@@ -1,8 +1,8 @@
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { EbayPrivatePhotos } from "./EbayPrivatePhotos";
-const prepare = vi.hoisted(() => vi.fn());
-vi.mock("../../app/listings/[id]/ebay/actions", () => ({ prepareEbayPrivateImageAction: prepare }));
+const { prepare, simulate } = vi.hoisted(() => ({ prepare: vi.fn(), simulate: vi.fn() }));
+vi.mock("../../app/listings/[id]/ebay/actions", () => ({ prepareEbayPrivateImageAction: prepare, simulateEbayMediaAction: simulate }));
 const props = { listingId: "listing", version: "version", connected: true, photos: [{ id: "image", order: 0, name: "synthetic.png", supported: true }] };
 beforeEach(() => { vi.resetAllMocks(); });
 afterEach(() => vi.useRealTimers());
@@ -24,7 +24,17 @@ it("makes no passive calls and keeps upload unavailable even after hydration", (
   expect(html).toContain('disabled=""'); expect(prepare).not.toHaveBeenCalled();
   render(<EbayPrivatePhotos {...props} />);
   expect(prepare).not.toHaveBeenCalled(); expect(screen.getByRole("button", { name: "Upload to eBay — unavailable" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: /Simulate media/ })).toBeNull(); expect(simulate).not.toHaveBeenCalled();
   expect(screen.getByText(/Sending photos to eBay is not available yet/)).toBeVisible();
+});
+it("offers only an explicit isolated simulation and displays only its safe state", async () => {
+  simulate.mockResolvedValue({ ok: true, data: { state: "confirmed", simulation: true } });
+  render(<EbayPrivatePhotos {...props} simulationAvailable />);
+  expect(simulate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Simulate media attempt for photo 1" }));
+  expect(await screen.findByText(/Simulated response recorded/)).toBeVisible();
+  expect(simulate).toHaveBeenCalledExactlyOnceWith("listing", "version", "image");
+  expect(screen.getByRole("button", { name: "Upload to eBay — unavailable" })).toBeDisabled();
 });
 it("validates only the explicitly selected image and shows no source or provider capability", async () => {
   prepare.mockResolvedValueOnce({ ok: true, data: { imageId: "image", width: 500, height: 600, size: 1200, expiresAt: "2099-01-01T00:00:00.000Z", exportEnabled: false, exportStatus: "not-attempted" } });
