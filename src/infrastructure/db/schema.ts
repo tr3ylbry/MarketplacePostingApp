@@ -5,6 +5,7 @@ import { users } from "./authSchema";
 export { users, sessions, accounts, verifications } from "./authSchema";
 export { ebayConnections, ebayOauthStates } from "./ebaySchema";
 export { ebayMediaAttempts } from "./ebayMediaSchema";
+export { ebayRealMediaAttempts, ebayRealMediaReceipts, ebayRealMediaAssociations } from "./ebayRealMediaSchema";
 
 export const listingStatus = pgEnum("listing_status", ["draft", "active", "sold", "archived"]);
 export const marketplace = pgEnum("marketplace", ["ebay", "craigslist", "reverb", "offerup", "facebook-marketplace"]);

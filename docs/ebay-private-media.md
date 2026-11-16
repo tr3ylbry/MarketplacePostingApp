@@ -40,6 +40,10 @@ The UI marks temporary photo reviews expired when their deadline passes; this is
 
 The owner has accepted the [local privacy defaults](photo-export-privacy.md), implemented by a [server-only internal boundary](photo-derivatives.md). It preserves sources, classifies narrow metadata/orientation/profile forms, produces Q95/4:4:4 JPEG or adaptive lossless PNG without pHYs, verifies exact final bytes and returns distinct source/derivative identities internally. It has no new action, route, export UI or provider consumer. **Validate photo N**, existing simulation fixtures/constraints, reads, bundles and Reverb behavior remain unchanged. Real media transport remains hard-disabled; local derivatives do not establish real EPS acceptance or a send grant.
 
+## Separate real persistence foundation
+
+The [real persistence-only slice](ebay-real-media-persistence.md) adds separate attempts, normalized receipts and current associations, immutable SQL content fences, owner RESTRICT and guarded repository transitions. Real response admission remains closed; tests use an opaque synthetic contract in a disposable database. No real association/resource exists, no simulation constraint is relaxed, and no route, transport, OAuth profile or runtime composition is enabled.
+
 ## Contract reconciliation — reviewed 2026-11-16
 
 The four-question follow-up was sent on November 13; its Sent record and the later support correspondence's Customer via Email entry both confirm submission. The latest reply received November 15 UTC (displayed November 16 in the discussion) confirms 201 JSON/Location but leaves the detailed URL/ingestion/limit/recovery questions unanswered. No newer matching reply was found during the November 16 review, and no message was sent. [Offline privacy findings](photo-export-review.md) do not count as real provider acceptance.
