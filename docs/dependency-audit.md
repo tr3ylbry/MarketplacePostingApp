@@ -44,6 +44,8 @@ Regression checks resolve minimatch from each actual owner, verify that a small 
 
 ## esbuild: retained, with explicit remaining decision
 
+The separate [retained Drizzle/esbuild assessment](drizzle-esbuild-exposure.md) adds fresh production-install, normal-build and executed-runtime evidence against this unmerged PR #22 baseline. It leaves packages unchanged and the advisory unresolved; installed presence, bundling, execution and vulnerable serving behavior are reported separately.
+
 The unresolved path is `drizzle-kit@0.31.11 → @esbuild-kit/esm-loader@2.6.5 → @esbuild-kit/core-utils@3.3.2 → esbuild@0.18.20`. The audit's four moderate entries are exactly **drizzle-kit, @esbuild-kit/esm-loader, @esbuild-kit/core-utils and esbuild**. Their installed versions are unchanged.
 
 Core-utils invokes `transform`/`transformSync`, not the affected esbuild development-server API. The current Drizzle CLI registers bundled tsx rather than importing this legacy loader. Its Studio `serve({fetch: app.fetch, ...})` is a separate Hono server, not esbuild's serve implementation. No project esbuild `serve` usage or route carrying browser data into it was found. No server/exploit was started to test this advisory. Loopback binding by itself would **not** mitigate the advisory's malicious-website/CORS scenario if an affected serve path were introduced.
