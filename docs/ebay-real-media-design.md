@@ -1,6 +1,6 @@
 # Proposed real Sandbox media records and transfer
 
-Reviewed design, 2026-11-16, against development baseline `b04159870a030d070b6d757c4187979feb92f69e`. The separately authorized [persistence-only slice](ebay-real-media-persistence.md) now implements records, guarded transitions and a disposable-tested migration. The rest remains proposed: **no real uploader, media authorization profile, orchestration, real URL admission or provider acceptance is implemented.** Stage 9B remains In Progress; real EPS stays hard-disabled. The next implementation requires separate approval. Inventory, offers, publication, remote attachment, background synchronization and generic HTTP proxying are excluded.
+Reviewed design, 2026-11-16, against development baseline `b04159870a030d070b6d757c4187979feb92f69e`. The separately authorized [persistence slice](ebay-real-media-persistence.md) implements records, guarded transitions and a disposable-tested migration. The [internal fake-only workflow](ebay-fake-media-workflow.md) now composes authenticated one-use review, the exact proposed synthetic grant, accepted derivatives and persistence with bounded fake sends. The rest remains proposed: **no real uploader, real media authorization profile, production orchestration, real URL admission or provider acceptance is implemented.** Stage 9B remains In Progress; real EPS stays hard-disabled. The next implementation requires separate approval. Inventory, offers, publication, remote attachment, background synchronization and generic HTTP proxying are excluded.
 
 ## Evidence and current boundary
 
@@ -178,7 +178,7 @@ One observation supplies evidence for a later narrow contract review, not all pe
 ## Smallest separately reviewed implementation slices
 
 1. **Real persistence only:** review this model, immutable content keys, state/deletion/offboarding rules and migrations in disposable PostgreSQL; implement repository transitions/tests without any transport or relaxed simulation schema.
-2. **Grant and orchestration with fakes:** exact media consent profile, one-use review, connection/derivative guard compatibility, retention, whole-pipeline admission and send/ack fences. Do not enable real calls.
+2. **Grant and orchestration with fakes:** [implemented for review](ebay-fake-media-workflow.md): exact proposed synthetic scope profile, one-use process-bound review, connection/derivative compatibility, retention, whole-pipeline capacity and send/ack guards. Real OAuth profile selection and calls remain disabled.
 3. **Pinned adapter with synthetic contracts:** bounded multipart/HTTP/response parsing and independently verified exact Location/EPS rules; enforce memory/header/deadline/egress behavior and all privacy tests. Keep normal runtime hard-disabled.
 4. **If needed, separately approved discovery:** review the capture-only exception/implementation and exact budget before a single real create. Return to contract review, not automatic rollout.
 5. **Separately approved normal acceptance:** run only its chosen OAuth path, one create and optional one verified download; document residuals. A successful result does not authorize inventory staging, offers, publication or automatic transport rollout.
