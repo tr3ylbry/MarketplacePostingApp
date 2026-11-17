@@ -44,6 +44,8 @@ The owner has accepted the [local privacy defaults](photo-export-privacy.md), im
 
 The [real persistence-only slice](ebay-real-media-persistence.md) adds separate attempts, normalized receipts and current associations, immutable SQL content fences, owner RESTRICT and guarded repository transitions. Real response admission remains closed; tests use an opaque synthetic contract in a disposable database. No real association/resource exists, no simulation constraint is relaxed, and no route, transport, OAuth profile or runtime composition is enabled.
 
+The subsequent [internal fake-only workflow](ebay-fake-media-workflow.md) connects authenticated one-use review, the exact proposed synthetic media grant, accepted derivative bytes, shared operation capacity and those persistence guards. It has no browser entry or normal runtime wiring. Actual OAuth identity/readiness profiles, simulation constraints and real receipt admission remain unchanged; its generated-image/session/native integration evidence is not real provider acceptance.
+
 ## Contract reconciliation — reviewed 2026-11-16
 
 The four-question follow-up was sent on November 13; its Sent record and the later support correspondence's Customer via Email entry both confirm submission. The latest reply received November 15 UTC (displayed November 16 in the discussion) confirms 201 JSON/Location but leaves the detailed URL/ingestion/limit/recovery questions unanswered. No newer matching reply was found during the November 16 review, and no message was sent. [Offline privacy findings](photo-export-review.md) do not count as real provider acceptance.

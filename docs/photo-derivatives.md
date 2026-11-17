@@ -1,10 +1,12 @@
 # Internal local photo derivatives
 
-The [accepted local privacy defaults](photo-export-privacy.md) are implemented behind `deriveOwnedPhoto` in `src/application/photoDerivativeServer.ts`. This is a **server-only internal function**, not a route, server action, download, browser export or provider integration. Existing **Validate photo N**, browser reads, Reverb, bundles and media simulation are unchanged. Real EPS transport remains hard-disabled; there is no new schema, credential, grant or environment switch.
+The [accepted local privacy defaults](photo-export-privacy.md) are implemented behind `deriveOwnedPhoto` in `src/application/photoDerivativeServer.ts`. This is a **server-only internal function**, not a route, server action, download or browser export. The [internal fake-only workflow](ebay-fake-media-workflow.md) now consumes the same derivative service through isolated test composition. Existing **Validate photo N**, browser reads, Reverb, bundles and media simulation are unchanged. Real EPS transport remains hard-disabled; there is no new schema, credential, real OAuth grant or environment switch.
 
 ## Authorized operation
 
 The caller supplies listing/image IDs and the listing version, never an owner or pathname. Better Auth supplies the owner. The service validates the owned listing/image and persisted verified Sandbox connection/configuration/scopes. It does not decrypt credentials, refresh access tokens or make provider calls; an expired access token alone is irrelevant to this local operation while refresh authorization remains valid.
+
+Local derivative/persistence scope guards accept the exact proposed synthetic base-plus-`sell.inventory` profile as well as the existing identity/readiness profiles. The actual OAuth selection/callback/refresh validators remain unchanged and reject that proposed profile; no real consent is enabled or readiness permissions silently combined. The complete fake workflow separately requires the proposed profile and adequate access lifetime.
 
 The existing repository commits owner-authorized source retention for five minutes plus one minute before storage I/O, never shortening a longer hold. The reader resolves only the trusted private source. Classification, Sharp encoding and final verification run outside PostgreSQL transactions. Before returning, the service rechecks owner, source metadata/identity, listing and exact connection/seller/configuration/scope versions. Edit, deletion, source changes, disconnect, reconnect or expired authorization discard the result. Physical source cleanup continues to respect the existing ledger even if the product record disappears.
 
@@ -37,7 +39,7 @@ An independent final-container allowlist permits JPEG codec/frame/scan structure
 
 ## Resource and cancellation contract
 
-At most **two complete derivative jobs per process**, no waiting queue. A 15-second monotonic eligibility deadline covers database lookups, private reads, classification, encoding, final decode and revalidation. Each native timeout is ≤10 seconds and rounded down to remaining time; less than one native second remaining fails closed. Native timeout excludes libuv wait, so the outer deadline is also checked after every awaited stage.
+At most **two shared photo-operation slots per process**, no waiting queue. A standalone derivative acquires its own slot; a complete fake workflow lends its existing opaque slot to its derivative and retains it through send/ack settlement. Slots cannot be forged or borrowed concurrently, and running child work prevents an early parent release. A 15-second monotonic derivative eligibility deadline covers database lookups, private reads, classification, encoding, final decode and revalidation. Each native timeout is ≤10 seconds and rounded down to remaining time; less than one native second remaining fails closed. Native timeout excludes libuv wait, so the outer deadline is also checked after every awaited stage.
 
 Abort/deadline never promotes a late result. There is no timeout race that releases capacity early: the service awaits started I/O/native work until it settles, then frees its slot in `finally`. A stalled dependency that ignores abort can therefore occupy a slot longer than the eligibility deadline; a hard process-kill guarantee is not claimed. Signals/listeners/readers/native handles are cleaned up by their boundaries.
 

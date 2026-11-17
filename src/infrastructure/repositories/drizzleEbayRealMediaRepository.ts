@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, isNotNull, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { z } from "zod";
-import { validEbayScopes } from "../../application/ebayConnection";
+import { hasProposedMediaScopes, validPhotoPreparationScopes } from "../../application/ebayMediaGrant";
 import { ownerIdSchema } from "../../application/owner";
 import { PRIVATE_IMAGE_REVIEW_MS } from "../../application/ebayPrivateImages";
 import { CLEANUP_GRACE_MS } from "../../application/imageStorage";
 import { REAL_MEDIA_LEASE_MS, RealMediaError, realMediaDigest, realMediaContextSchema, realMediaContentSchema,
-  mediaHash, mediaId, safeRealMediaFailure, type RealMediaContext, type RealMediaContent, type RealMediaClaim, type RealMediaSummary, type RealMediaState } from "../../application/ebayRealMedia";
+  mediaHash, mediaId, mediaSessionHash, safeRealMediaFailure, type RealMediaContext, type RealMediaContent, type RealMediaClaim,
+  type RealMediaSummary, type RealMediaState, type RealMediaBinding, type RealMediaSnapshot, type RealMediaReviewGuard, type RealMediaRepository } from "../../application/ebayRealMedia";
 import { admittedMediaReceipt } from "../ebay/realMediaEvidence";
 import * as schema from "../db/schema";
 
@@ -19,7 +20,7 @@ type Receipt = typeof receipts.$inferSelect;
 const claimSchema = z.strictObject({ id: mediaId, ownerId: ownerIdSchema, listingId: mediaId, imageId: mediaId, token: z.uuid(),
   revision: z.number().int().nonnegative(), sessionHash: mediaHash, actionHash: mediaHash });
 
-// Global lock order: owned listing, connection, image, attempt, association.
+// Global lock order: owned listing, connection, image, live session, attempt, association.
 async function context(tx: Transaction, owner: string, listingId: string, imageId: string, now: Date) {
   const [listing] = await tx.select().from(schema.listings).where(and(eq(schema.listings.id, listingId), eq(schema.listings.ownerId, owner))).for("update");
   const [connection] = await tx.select().from(schema.ebayConnections).where(eq(schema.ebayConnections.ownerId, owner)).for("update");
@@ -30,16 +31,28 @@ async function context(tx: Transaction, owner: string, listingId: string, imageI
   if (!listing || !connection || !image || image.kind !== "vercel-blob" || !["image/jpeg", "image/png"].includes(image.type ?? "") ||
     connection.environment !== "sandbox" || connection.status !== "connected" || !mediaHash.safeParse(connection.sellerId).success ||
     !connection.access || !connection.refresh || !connection.connectedAt || !connection.refreshExpiresAt ||
-    Date.parse(connection.refreshExpiresAt) <= now.getTime() || !validEbayScopes(connection.scopes)) return null;
+    Date.parse(connection.refreshExpiresAt) <= now.getTime() || !validPhotoPreparationScopes(connection.scopes)) return null;
   const result = await tx.execute(sql`SELECT public.real_media_grant_version(${sql.param(connection.scopes)}::text[]) AS hash`);
-  return { listingVersion: new Date(listing.updatedAt).toISOString(), connectionId: connection.id, connectionVersion: connection.version,
+  return { ownerId: owner, listingId, imageId, listingVersion: new Date(listing.updatedAt).toISOString(), connectionId: connection.id, connectionVersion: connection.version,
     configHash: connection.configHash, grantHash: String(result.rows[0]?.hash), sellerKey: connection.sellerId!,
-    sourceVersion: image.sourceVersion, imageOrder: image.order, sourceType: image.type };
+    sourceVersion: image.sourceVersion, imageOrder: image.order, sourceType: image.type,
+    mediaGrant: hasProposedMediaScopes(connection.scopes), accessExpiresAt: connection.accessExpiresAt ? new Date(connection.accessExpiresAt).toISOString() : null };
 }
-function matches(current: Awaited<ReturnType<typeof context>>, row: Attempt) {
-  return current && current.listingVersion === new Date(row.listingVersion).toISOString() && current.connectionId === row.connectionId &&
+function matches(current: Awaited<ReturnType<typeof context>>, row: RealMediaBinding) {
+  return current && current.ownerId === row.ownerId && current.listingId === row.listingId && current.imageId === row.imageId &&
+    current.listingVersion === new Date(row.listingVersion).toISOString() && current.connectionId === row.connectionId &&
     current.connectionVersion === row.connectionVersion && current.configHash === row.configHash && current.grantHash === row.grantHash &&
     current.sellerKey === row.sellerKey && current.sourceVersion === row.sourceVersion && current.imageOrder === row.imageOrder;
+}
+function reviewMatches(current: Awaited<ReturnType<typeof context>>, guard: RealMediaReviewGuard, now: Date) {
+  return matches(current, guard.binding) && current!.mediaGrant && guard.binding.mediaGrant &&
+    current!.accessExpiresAt === guard.binding.accessExpiresAt && Date.parse(current!.accessExpiresAt ?? "") > now.getTime();
+}
+async function liveSession(tx: Transaction, claim: Pick<RealMediaClaim, "ownerId" | "sessionHash">, guard: RealMediaReviewGuard, clock: () => Date) {
+  if (!mediaId.safeParse(guard.sessionId).success || mediaSessionHash(claim.ownerId, guard.sessionId) !== claim.sessionHash) return false;
+  const [session] = await tx.select({ expiresAt: schema.sessions.expiresAt }).from(schema.sessions).where(and(eq(schema.sessions.id, guard.sessionId),
+    eq(schema.sessions.userId, claim.ownerId), gt(schema.sessions.expiresAt, clock()))).for("share");
+  return !!session && session.expiresAt.getTime() > clock().getTime();
 }
 function ownsClaim(row: Attempt | undefined, claim: RealMediaClaim) {
   return row && row.ownerId === claim.ownerId && row.listingId === claim.listingId && row.imageId === claim.imageId &&
@@ -50,17 +63,28 @@ function contradictory(rows: Receipt[]) {
   return rows.some(row => row.level === "conflict") || evidenceKeys.some(key => new Set(rows.flatMap(row => row[key] === null ? [] : [key === "expiresAt" ? String(Date.parse(row.expiresAt!)) : String(row[key])])).size > 1);
 }
 
-export class DrizzleEbayRealMediaRepository {
+export class DrizzleEbayRealMediaRepository implements RealMediaRepository {
   constructor(private readonly db: Database, private readonly clock = () => new Date()) {}
   private async protect<T>(operation: () => Promise<T>): Promise<T> {
     try { return await operation(); } catch (error) { throw safeRealMediaFailure(error); }
   }
-  async claim(input: RealMediaContext): Promise<RealMediaClaim> {
+  async snapshot(owner: string, listingId: string, imageId: string): Promise<RealMediaSnapshot> {
+    return this.protect(async () => {
+      ownerIdSchema.parse(owner); mediaId.parse(listingId); mediaId.parse(imageId);
+      return this.db.transaction(async tx => {
+        const current = await context(tx, owner, listingId, imageId, this.clock());
+        if (!current) throw new RealMediaError("stale");
+        const { sourceType, ...snapshot } = current; void sourceType; return snapshot;
+      });
+    });
+  }
+  async claim(input: RealMediaContext, guard?: RealMediaReviewGuard): Promise<RealMediaClaim> {
     return this.protect(async () => {
       const value = realMediaContextSchema.parse(input), now = this.clock(), token = randomUUID();
       return this.db.transaction(async tx => {
         const current = await context(tx, value.ownerId, value.listingId, value.imageId, now);
         if (!current || current.listingVersion !== value.listingVersion || current.configHash !== value.configHash) throw new RealMediaError("stale");
+        if (guard && (!reviewMatches(current, guard, this.clock()) || !await liveSession(tx, value, guard, this.clock))) throw new RealMediaError("stale");
         const [fenced] = await tx.select({ id: attempts.id }).from(attempts).where(and(eq(attempts.ownerId, value.ownerId),
           eq(attempts.listingId, value.listingId), eq(attempts.imageId, value.imageId), isNotNull(attempts.postIntentAt))).limit(1);
         if (fenced) throw new RealMediaError("blocked");
@@ -88,11 +112,12 @@ export class DrizzleEbayRealMediaRepository {
       });
     });
   }
-  async fence(input: RealMediaClaim, content: RealMediaContent): Promise<RealMediaClaim> {
+  async fence(input: RealMediaClaim, content: RealMediaContent, guard?: RealMediaReviewGuard): Promise<RealMediaClaim> {
     return this.protect(async () => {
       const claim = claimSchema.parse(input), data = realMediaContentSchema.parse(content), now = this.clock();
       return this.db.transaction(async tx => {
         const current = await context(tx, claim.ownerId, claim.listingId, claim.imageId, now);
+        if (guard && (!reviewMatches(current, guard, this.clock()) || !await liveSession(tx, claim, guard, this.clock))) throw new RealMediaError("stale");
         const [row] = await tx.select().from(attempts).where(and(eq(attempts.id, claim.id), eq(attempts.ownerId, claim.ownerId))).for("update");
         if (!ownsClaim(row, claim) || !matches(current, row) || current?.sourceType !== data.contentType || row.revision !== claim.revision || row.recipe !== data.recipe ||
           row.state !== "preparing" || row.postIntentAt || !row.leaseUntil || Date.parse(row.leaseUntil) <= now.getTime()) throw new RealMediaError("stale");
@@ -101,6 +126,18 @@ export class DrizzleEbayRealMediaRepository {
           revision: row.revision + 1, updatedAt: now.toISOString() }).where(and(eq(attempts.id, row.id), eq(attempts.revision, claim.revision))).returning({ id: attempts.id });
         if (!changed) throw new RealMediaError("stale");
         return { ...claim, revision: row.revision + 1 };
+      });
+    });
+  }
+  async beforeSend(input: RealMediaClaim, guard: RealMediaReviewGuard): Promise<void> {
+    return this.protect(async () => {
+      const claim = claimSchema.parse(input), now = this.clock();
+      await this.db.transaction(async tx => {
+        const current = await context(tx, claim.ownerId, claim.listingId, claim.imageId, now);
+        if (!reviewMatches(current, guard, this.clock()) || !await liveSession(tx, claim, guard, this.clock)) throw new RealMediaError("stale");
+        const [row] = await tx.select().from(attempts).where(and(eq(attempts.id, claim.id), eq(attempts.ownerId, claim.ownerId))).for("update");
+        if (!ownsClaim(row, claim) || !matches(current, row) || row.revision !== claim.revision || row.state !== "unknown" ||
+          !row.postIntentAt || !row.leaseUntil || Date.parse(row.leaseUntil) <= now.getTime()) throw new RealMediaError("stale");
       });
     });
   }
@@ -114,11 +151,12 @@ export class DrizzleEbayRealMediaRepository {
       if (!row) throw new RealMediaError("stale"); return { state: "not-sent", associated: false };
     });
   }
-  async acknowledge(input: RealMediaClaim, proof: unknown): Promise<RealMediaSummary> {
+  async acknowledge(input: RealMediaClaim, proof: unknown, options?: { guard: RealMediaReviewGuard; responseOnly: boolean }): Promise<RealMediaSummary> {
     return this.protect(async () => {
       const claim = claimSchema.parse(input), now = this.clock();
       return this.db.transaction(async tx => {
         const current = await context(tx, claim.ownerId, claim.listingId, claim.imageId, now);
+        const associationAllowed = !options || !options.responseOnly && reviewMatches(current, options.guard, this.clock()) && await liveSession(tx, claim, options.guard, this.clock);
         const [row] = await tx.select().from(attempts).where(and(eq(attempts.id, claim.id), eq(attempts.ownerId, claim.ownerId))).for("update");
         if (!ownsClaim(row, claim) || !row.postIntentAt || claim.revision < 1 || claim.revision > row.revision) throw new RealMediaError("stale");
         const database = await tx.execute(sql`SELECT current_database() AS name`);
@@ -131,7 +169,7 @@ export class DrizzleEbayRealMediaRepository {
         const conflict = contradictory(previous);
         const complete = previous.find(r => r.level === "complete" && r.expiresAt && Date.parse(r.expiresAt) > now.getTime() + 60000);
         const [existing] = await tx.select().from(associations).where(eq(associations.imageId, row.imageId)).for("update");
-        const fresh = matches(current, row) && row.operation === "normal" && (!existing || existing.attemptId === row.id);
+        const fresh = associationAllowed && matches(current, row) && row.operation === "normal" && (!existing || existing.attemptId === row.id);
         const state: RealMediaState = conflict ? "unknown" : complete ? fresh ? "confirmed" : "residual" : row.state === "confirmed" || row.state === "residual" ? "residual" : "unknown";
         const reason = conflict ? "conflict" : complete ? fresh ? "response" : "changed" : previous.some(r => r.expiresAt && Date.parse(r.expiresAt) <= now.getTime() + 60000) ? "expired" : "response";
         await tx.update(attempts).set({ state, reason, leaseUntil: null, revision: row.revision + 1, updatedAt: now.toISOString() }).where(eq(attempts.id, row.id));

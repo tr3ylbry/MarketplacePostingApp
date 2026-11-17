@@ -26,6 +26,23 @@ export interface RealMediaClaim {
 }
 export type RealMediaState = "preparing" | "not-sent" | "unknown" | "confirmed" | "residual";
 export interface RealMediaSummary { state: RealMediaState; associated: boolean }
+// Internal context only; no private pathname, token or browser-facing receipt.
+export interface RealMediaBinding {
+  ownerId: string; listingId: string; imageId: string; listingVersion: string;
+  connectionId: string; connectionVersion: string; configHash: string; grantHash: string;
+  sellerKey: string; sourceVersion: string; imageOrder: number;
+}
+export interface RealMediaSnapshot extends RealMediaBinding { mediaGrant: boolean; accessExpiresAt: string | null }
+export interface RealMediaReviewGuard { binding: RealMediaSnapshot; sessionId: string }
+export const mediaSessionHash = (owner: string, sessionId: string) => realMediaDigest(JSON.stringify(["media-session-v1", owner, sessionId]));
+export interface RealMediaRepository {
+  snapshot(owner: string, listingId: string, imageId: string): Promise<RealMediaSnapshot>;
+  claim(input: RealMediaContext, guard?: RealMediaReviewGuard): Promise<RealMediaClaim>;
+  fence(input: RealMediaClaim, content: RealMediaContent, guard?: RealMediaReviewGuard): Promise<RealMediaClaim>;
+  beforeSend(input: RealMediaClaim, guard: RealMediaReviewGuard): Promise<void>;
+  notSent(input: RealMediaClaim): Promise<RealMediaSummary>;
+  acknowledge(input: RealMediaClaim, proof: unknown, options?: { guard: RealMediaReviewGuard; responseOnly: boolean }): Promise<RealMediaSummary>;
+}
 export class RealMediaError extends Error {
   constructor(readonly code: "stale" | "blocked" | "contract" | "unavailable") {
     super({ stale: "The photo, session or Sandbox connection changed. Reload before continuing.",
