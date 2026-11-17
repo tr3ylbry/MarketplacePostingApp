@@ -18,6 +18,8 @@ Current official registry declarations were rechecked:
 
 The affected leaf is **esbuild 0.18.20**. Drizzle's separate 0.25.12 and tsx/Vite's 0.28.2 copies are outside this advisory. There is no current stable update in the owning legacy range that removes or patches the affected chain. Do not force 0.25+ into `~0.18.20`, follow npm's suggested Drizzle 0.18.1 downgrade, remove migration tooling, or broadly omit optional dependencies used by native images. A future stable upstream loader removal is preferred; a loader migration or narrower production-packaging design needs separate review.
 
+A second disposable install tested the supported `npm ci --omit=dev --omit=peer --ignore-scripts` option on **Node 24.14.1 / npm 11.16.0**. It exited 0 but **still installed Drizzle Kit/core-utils and retained all four moderate audit entries**; its audit exited 1. A generated 2×1 alpha-PNG native Sharp control passed and its platform binary remained installed. Thus peer omission is not a demonstrated remedy for this lockfile and is not adopted. A failed bare `require.resolve` on an export-restricted native package was not treated as proof the package was absent; its directory/binary and actual image operation were checked instead.
+
 ## Installed, bundled, loaded and reachable
 
 | Boundary | Evidence | Limit of the evidence |
