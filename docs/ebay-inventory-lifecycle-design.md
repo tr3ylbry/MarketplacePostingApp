@@ -4,6 +4,8 @@
 
 ## Recommendation and decision gates
 
+**November 19 follow-up:** the owner explicitly approved D1–D8 for one persistence-only slice, including derived current links and append-only recovery evidence, while omitting verbose diagnostics. The [implementation boundary](ebay-inventory-persistence.md) records what is now implemented and the operational obligations still outstanding. The original proposal below is retained as decision history; its “approval required” language describes the original design checkpoint. No adapter, real ownership admission or Inventory write permission is approved.
+
 **Initial policy: NO-GO for automatic Inventory PUT and DELETE.** Build only separately approved persistence and fake/read-only observation boundaries first. Refuse existing-item replacement/adoption, automatic retries and SKU reuse. A durable local claim can coordinate this application; it cannot prove that an upsert created a resource or exclude another eBay client. Manual review produces an owned private residual record, not an override that enables a write.
 
 Before any real write design can be enabled, obtain a documented mechanism that supplies the required creation/incarnation and deletion assurances, or separately review a materially different risk policy. No seller-exclusivity checkbox, operator flag, special SKU prefix, local lock or matching-body shortcut satisfies that gate. Completing this design does not require solving those provider limitations.
