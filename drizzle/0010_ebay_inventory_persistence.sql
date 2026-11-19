@@ -118,6 +118,7 @@ BEGIN
   IF NEW.current_listing_id IS NULL AND OLD.current_listing_id IS NOT NULL AND NEW.hold='none' THEN NEW.hold := 'resource'; END IF;
   IF NEW.current_connection_id IS NULL AND OLD.current_connection_id IS NOT NULL AND NEW.retired_at IS NULL THEN NEW.retired_at := clock_timestamp(); END IF;
   IF NEW.retired_at IS NOT NULL AND OLD.retired_at IS NULL THEN
+   NEW.retired_at := clock_timestamp();
    NEW.hold := 'seller'; NEW.current_listing_id := NULL; NEW.current_connection_id := NULL;
    NEW.retention_review_at := NEW.retired_at + interval '12 months';
    NEW.offboard_review_due_at := NEW.retired_at + interval '7 days';
@@ -143,45 +144,60 @@ $$;
 --> statement-breakpoint
 CREATE FUNCTION public.inventory_attempt_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
-DECLARE r public.ebay_inventory_resources;
+DECLARE r public.ebay_inventory_resources; l public.listings; c public.ebay_connections; s public.sessions;
+ authorization_at timestamptz; authorizing boolean;
 BEGIN
  IF TG_OP IN ('DELETE','TRUNCATE') THEN RAISE EXCEPTION 'Consumed Inventory actions are retained'; END IF;
  SELECT * INTO r FROM public.ebay_inventory_resources WHERE id=NEW.resource_id AND owner_id=NEW.owner_id;
  IF r.id IS NOT NULL THEN PERFORM pg_advisory_xact_lock(hashtextextended('inventory:sandbox:' || r.seller_key,0)); END IF;
  SELECT * INTO r FROM public.ebay_inventory_resources WHERE id=NEW.resource_id AND owner_id=NEW.owner_id FOR UPDATE;
  IF r.id IS NULL THEN RAISE EXCEPTION 'Invalid Inventory context'; END IF;
+ IF TG_OP='INSERT' THEN authorizing := true; ELSE authorizing := NEW.intent_at IS DISTINCT FROM OLD.intent_at; END IF;
+ IF authorizing THEN
+  -- The repository already owns these locks in listing -> connection -> seller
+  -- -> resource -> attempt -> session order. Direct SQL must fail fast rather
+  -- than wait for earlier locks while holding the attempt/resource in reverse.
+  SELECT * INTO l FROM public.listings WHERE id=NEW.listing_id AND owner_id=NEW.owner_id FOR UPDATE NOWAIT;
+  SELECT * INTO c FROM public.ebay_connections WHERE owner_id=NEW.owner_id FOR UPDATE NOWAIT;
+  SELECT * INTO s FROM public.sessions WHERE user_id=NEW.owner_id AND public.inventory_session_hash(user_id,id)=NEW.session_hash FOR SHARE NOWAIT;
+  -- Neither transaction_timestamp()/now() nor caller timestamps measure elapsed
+  -- time after a lock wait. Sample once AFTER every potentially blocking lock.
+  authorization_at := clock_timestamp();
+  IF l.id IS NULL OR c.id IS NULL OR s.id IS NULL OR r.retired_at IS NOT NULL OR
+   r.current_listing_id IS DISTINCT FROM NEW.listing_id OR r.current_connection_id IS DISTINCT FROM NEW.connection_id OR
+   l.updated_at IS DISTINCT FROM NEW.listing_version OR c.id IS DISTINCT FROM NEW.connection_id OR
+   c.version IS DISTINCT FROM NEW.connection_version OR c.config_hash IS DISTINCT FROM NEW.config_hash OR
+   c.seller_id IS DISTINCT FROM r.seller_key OR c.environment<>'sandbox' OR c.status<>'connected' OR
+   public.real_media_grant_version(c.scopes) IS DISTINCT FROM NEW.grant_hash OR
+   c.refresh_expires_at IS NULL OR c.refresh_expires_at<=authorization_at OR s.expires_at<=authorization_at THEN
+   RAISE EXCEPTION 'Inventory authorization expired or changed';
+  END IF;
+ END IF;
  IF TG_OP = 'INSERT' THEN
-  PERFORM pg_advisory_xact_lock(hashtextextended('inventory:sandbox:' || r.seller_key,0));
-  IF NEW.state<>'preparing' OR NEW.revision<>0 OR NEW.intent_at IS NOT NULL OR r.retired_at IS NOT NULL OR
-   NOT EXISTS (SELECT 1 FROM public.listings l JOIN public.ebay_connections c ON c.owner_id=l.owner_id
-    WHERE l.id=NEW.listing_id AND l.id=r.current_listing_id AND l.owner_id=NEW.owner_id AND l.updated_at=NEW.listing_version
-     AND c.id=NEW.connection_id AND c.id=r.current_connection_id AND c.version=NEW.connection_version AND c.config_hash=NEW.config_hash
-     AND c.seller_id=r.seller_key AND c.status='connected' AND c.environment='sandbox'
-     AND c.refresh_expires_at>NEW.created_at AND public.real_media_grant_version(c.scopes)=NEW.grant_hash) OR
-   NOT EXISTS(SELECT 1 FROM public.sessions s WHERE s.user_id=NEW.owner_id AND s.expires_at>NEW.created_at
-    AND public.inventory_session_hash(s.user_id,s.id)=NEW.session_hash) THEN RAISE EXCEPTION 'Invalid Inventory context'; END IF;
+  IF NEW.state<>'preparing' OR NEW.revision<>0 OR NEW.intent_at IS NOT NULL OR NEW.lease_until<=authorization_at OR
+   NEW.lease_until>authorization_at+interval '60 seconds' THEN RAISE EXCEPTION 'Invalid Inventory claim'; END IF;
   IF NEW.operation<>'inspect' AND (r.hold<>'none' OR EXISTS(SELECT 1 FROM public.ebay_inventory_resources x WHERE x.environment=r.environment AND x.seller_key=r.seller_key AND x.hold='seller')) THEN
    RAISE EXCEPTION 'Inventory requires private review';
   END IF;
+  NEW.created_at := authorization_at; NEW.updated_at := authorization_at;
  ELSE
   IF (to_jsonb(NEW)-ARRAY['revision','state','intent_at','payload_digest','media_manifest_digest','updated_at']) IS DISTINCT FROM
      (to_jsonb(OLD)-ARRAY['revision','state','intent_at','payload_digest','media_manifest_digest','updated_at']) OR
     NEW.revision<>OLD.revision+1 OR NEW.updated_at<OLD.updated_at THEN RAISE EXCEPTION 'Immutable Inventory binding or invalid revision'; END IF;
   IF OLD.intent_at IS NOT NULL AND ROW(NEW.intent_at,NEW.payload_digest,NEW.media_manifest_digest) IS DISTINCT FROM
     ROW(OLD.intent_at,OLD.payload_digest,OLD.media_manifest_digest) THEN RAISE EXCEPTION 'Inventory intent is immutable'; END IF;
-  IF NEW.intent_at IS DISTINCT FROM OLD.intent_at THEN
-   IF OLD.state<>'preparing' OR NEW.state<>'fenced' OR NEW.operation='inspect' OR OLD.lease_until<=NEW.updated_at OR r.retired_at IS NOT NULL OR r.hold<>'none' OR
-     EXISTS(SELECT 1 FROM public.ebay_inventory_resources x WHERE x.environment=r.environment AND x.seller_key=r.seller_key AND x.hold='seller') OR
-     NOT EXISTS(SELECT 1 FROM public.listings l JOIN public.ebay_connections c ON c.owner_id=l.owner_id
-      WHERE l.id=NEW.listing_id AND l.id=r.current_listing_id AND l.owner_id=NEW.owner_id AND l.updated_at=NEW.listing_version
-       AND c.id=NEW.connection_id AND c.id=r.current_connection_id AND c.version=NEW.connection_version AND c.status='connected'
-       AND c.config_hash=NEW.config_hash AND c.seller_id=r.seller_key AND c.refresh_expires_at>NEW.updated_at AND public.real_media_grant_version(c.scopes)=NEW.grant_hash) OR
-     NOT EXISTS(SELECT 1 FROM public.sessions s WHERE s.user_id=NEW.owner_id AND s.expires_at>NEW.updated_at
-      AND public.inventory_session_hash(s.user_id,s.id)=NEW.session_hash) THEN
+  IF authorizing THEN
+   IF OLD.state<>'preparing' OR NEW.state<>'fenced' OR NEW.operation='inspect' OR OLD.lease_until<=authorization_at OR r.hold<>'none' OR
+     EXISTS(SELECT 1 FROM public.ebay_inventory_resources x WHERE x.environment=r.environment AND x.seller_key=r.seller_key AND x.hold='seller') THEN
     RAISE EXCEPTION 'Inventory intent context is stale';
    END IF;
+   NEW.intent_at := authorization_at; NEW.updated_at := authorization_at;
   ELSIF NEW.state='fenced' AND OLD.state<>'fenced' THEN RAISE EXCEPTION 'Inventory intent is required'; END IF;
-  IF NEW.state='retired' AND (OLD.state<>'preparing' OR OLD.intent_at IS NOT NULL OR OLD.lease_until>NEW.updated_at) THEN RAISE EXCEPTION 'Only expired unfenced claims may retire'; END IF;
+  IF NEW.state='retired' THEN
+   authorization_at := clock_timestamp();
+   IF OLD.state<>'preparing' OR OLD.intent_at IS NOT NULL OR OLD.lease_until>authorization_at THEN RAISE EXCEPTION 'Only expired unfenced claims may retire'; END IF;
+   NEW.updated_at := authorization_at;
+  END IF;
   IF OLD.state IN ('retired','conflict') AND NEW.state<>OLD.state THEN RAISE EXCEPTION 'Inventory uncertainty cannot reset'; END IF;
   IF NEW.state='preparing' THEN RAISE EXCEPTION 'Inventory actions cannot reset'; END IF;
   IF NEW.state IN ('acknowledged','conflict') AND pg_trigger_depth()<2 THEN RAISE EXCEPTION 'Inventory outcome requires append-only evidence'; END IF;
@@ -247,6 +263,7 @@ BEGIN
  IF r.id IS NOT NULL THEN PERFORM pg_advisory_xact_lock(hashtextextended('inventory:sandbox:' || r.seller_key,0)); END IF;
  SELECT * INTO r FROM public.ebay_inventory_resources WHERE id=NEW.resource_id AND owner_id=NEW.owner_id FOR UPDATE;
  SELECT * INTO a FROM public.ebay_inventory_attempts WHERE id=NEW.attempt_id AND resource_id=NEW.resource_id AND owner_id=NEW.owner_id FOR UPDATE;
+ NEW.created_at := clock_timestamp();
  IF a.id IS NULL OR r.id IS NULL OR NEW.expected_revision>a.revision OR NOT public.inventory_evidence_valid(NEW.envelope) OR
    (NEW.envelope->>'finishedAt')::timestamptz>NEW.created_at OR NOT isfinite(NEW.created_at) THEN RAISE EXCEPTION 'Invalid normalized Inventory evidence'; END IF;
  IF NEW.envelope->>'kind'='acknowledgement' AND a.intent_at IS NULL THEN RAISE EXCEPTION 'Acknowledgement requires immutable local intent'; END IF;

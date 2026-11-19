@@ -18,7 +18,11 @@ async function sellerGuard(tx: Transaction, seller: string) {
   // only over-serializes. No remote reservation is implied by this local lock.
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('inventory:sandbox:' || ${seller}, 0))`);
 }
-async function context(tx: Transaction, input: InventoryClaimInput, now: Date) {
+async function wallTime(tx: Transaction) {
+  const result = await tx.execute(sql`SELECT clock_timestamp() AS at`);
+  return new Date(result.rows[0].at as string);
+}
+async function context(tx: Transaction, input: InventoryClaimInput) {
   // Existing repositories acquire listing -> connection. Take the new seller
   // guard only after those locks, then resource -> attempt -> session.
   const [listing] = await tx.select().from(schema.listings).where(and(eq(schema.listings.id, input.listingId), eq(schema.listings.ownerId, input.ownerId))).for("update");
@@ -26,14 +30,15 @@ async function context(tx: Transaction, input: InventoryClaimInput, now: Date) {
   if (!listing || !connection || new Date(listing.updatedAt).toISOString() !== input.listingVersion ||
     connection.id !== input.connectionId || connection.version !== input.connectionVersion || connection.configHash !== input.configHash ||
     connection.environment !== "sandbox" || connection.status !== "connected" || !connection.sellerId || !/^[a-f0-9]{64}$/.test(connection.sellerId) ||
-    !connection.refresh || !connection.access || !connection.refreshExpiresAt || Date.parse(connection.refreshExpiresAt) <= now.getTime()) throw new InventoryPersistenceError("stale");
+    !connection.refresh || !connection.access || !connection.refreshExpiresAt) throw new InventoryPersistenceError("stale");
   const grant = await tx.execute(sql`SELECT public.real_media_grant_version(${sql.param(connection.scopes)}::text[]) AS hash`);
   if (grant.rows[0]?.hash !== input.grantHash) throw new InventoryPersistenceError("stale");
-  return connection.sellerId;
+  return connection;
 }
-async function liveSession(tx: Transaction, owner: string, session: string, now: Date) {
+async function liveSession(tx: Transaction, owner: string, session: string) {
   const [row] = await tx.select().from(schema.sessions).where(and(eq(schema.sessions.id, session), eq(schema.sessions.userId, owner))).for("share");
-  if (!row || row.expiresAt.getTime() <= now.getTime()) throw new InventoryPersistenceError("stale");
+  if (!row) throw new InventoryPersistenceError("stale");
+  return row;
 }
 async function sessionHash(tx: Transaction, owner: string, session: string) {
   const result = await tx.execute(sql`SELECT public.inventory_session_hash(${owner},${session}) AS hash`);
@@ -49,7 +54,7 @@ const claimValue = (row: Attempt, token: string): InventoryClaim => ({ id: row.i
 // Internal persistence only. No runtime factory, provider client, transport or
 // ownership admission. The authenticated server must supply owner/session IDs.
 export class DrizzleEbayInventoryRepository {
-  constructor(private readonly db: Database, private readonly clock = () => new Date()) {}
+  constructor(private readonly db: Database) {}
   private async protect<T>(work: () => Promise<T>): Promise<T> {
     try { return await work(); } catch (error) {
       if (error instanceof InventoryPersistenceError) throw error;
@@ -57,7 +62,7 @@ export class DrizzleEbayInventoryRepository {
       let value: unknown = error;
       for (let n = 0; n < 5 && value && typeof value === "object"; n++) {
         const e = value as { code?: string; cause?: unknown };
-        if (["23505", "23503", "P0001", "40P01", "40001"].includes(e.code ?? "")) throw new InventoryPersistenceError("blocked");
+        if (["23505", "23503", "P0001", "40P01", "40001", "55P03"].includes(e.code ?? "")) throw new InventoryPersistenceError("blocked");
         value = e.cause;
       }
       throw new InventoryPersistenceError("unavailable");
@@ -65,15 +70,16 @@ export class DrizzleEbayInventoryRepository {
   }
   async claim(input: InventoryClaimInput): Promise<InventoryClaim> {
     return this.protect(async () => {
-      const value = inventoryClaimInput.parse(input), now = this.clock(), token = randomUUID();
+      const value = inventoryClaimInput.parse(input), token = randomUUID();
       return this.db.transaction(async tx => {
-        const seller = await context(tx, value, now); await sellerGuard(tx, seller);
+        const connection = await context(tx, value), seller = connection.sellerId!; await sellerGuard(tx, seller);
         let [resource] = await tx.select().from(resources).where(and(eq(resources.environment, "sandbox"), eq(resources.sellerKey, seller), eq(resources.sku, ebaySku(value.listingId)))).for("update");
         if (resource && (resource.ownerId !== value.ownerId || resource.historicalListingId !== value.listingId || resource.retiredAt || !resource.currentListingId || !resource.currentConnectionId)) throw new InventoryPersistenceError("blocked");
         if (!resource) {
+          const createdAt = (await wallTime(tx)).toISOString();
           [resource] = await tx.insert(resources).values({ id: randomUUID(), ownerId: value.ownerId, sellerKey: seller, sku: ebaySku(value.listingId),
             historicalListingId: value.listingId, currentListingId: value.listingId, currentConnectionId: value.connectionId,
-            createdAt: now.toISOString(), reviewDueAt: now.toISOString() }).returning(); // SQL computes calendar review dates.
+            createdAt, reviewDueAt: createdAt }).returning(); // SQL computes calendar review dates.
         }
         if (value.operation !== "inspect") {
           const [held] = await tx.select({ id: resources.id }).from(resources).where(and(eq(resources.sellerKey, seller), eq(resources.hold, "seller"))).limit(1);
@@ -82,12 +88,13 @@ export class DrizzleEbayInventoryRepository {
         const [consumed] = await tx.select({ id: attempts.id }).from(attempts).where(and(eq(attempts.ownerId, value.ownerId), eq(attempts.actionHash, value.actionHash))).limit(1);
         if (consumed) throw new InventoryPersistenceError("blocked");
         const [old] = await tx.select().from(attempts).where(and(eq(attempts.resourceId, resource.id), eq(attempts.state, "preparing"))).for("update");
+        const session = await liveSession(tx, value.ownerId, value.sessionId), now = await wallTime(tx);
+        if (session.expiresAt.getTime() <= now.getTime() || Date.parse(connection.refreshExpiresAt!) <= now.getTime()) throw new InventoryPersistenceError("stale");
         if (old) {
           if (old.intentAt || Date.parse(old.leaseUntil) > now.getTime()) throw new InventoryPersistenceError("blocked");
           await tx.update(attempts).set({ state: "retired", revision: old.revision + 1, updatedAt: now.toISOString() })
             .where(and(eq(attempts.id, old.id), eq(attempts.revision, old.revision)));
         }
-        await liveSession(tx, value.ownerId, value.sessionId, now);
         const { sessionId, ...binding } = value;
         const [row] = await tx.insert(attempts).values({ ...binding, id: randomUUID(), resourceId: resource.id,
           sessionHash: await sessionHash(tx, value.ownerId, sessionId), claimHash: inventoryDigest(token),
@@ -108,17 +115,18 @@ export class DrizzleEbayInventoryRepository {
   }
   async recordIntent(input: InventoryClaim, intent: InventoryIntent, current: InventoryClaimInput): Promise<InventoryClaim> {
     return this.protect(async () => {
-      const claim = inventoryClaimSchema.parse(input), data = inventoryIntentSchema.parse(intent), guard = inventoryClaimInput.parse(current), now = this.clock();
+      const claim = inventoryClaimSchema.parse(input), data = inventoryIntentSchema.parse(intent), guard = inventoryClaimInput.parse(current);
       if (guard.ownerId !== claim.ownerId || guard.actionHash !== claim.actionHash) throw new InventoryPersistenceError("stale");
       return this.db.transaction(async tx => {
-        await context(tx, guard, now);
+        const connection = await context(tx, guard);
         if (await sessionHash(tx, guard.ownerId, guard.sessionId) !== claim.sessionHash) throw new InventoryPersistenceError("stale");
         const { row, resource } = await this.locked(tx, claim);
+        const session = await liveSession(tx, claim.ownerId, guard.sessionId), now = await wallTime(tx);
         if (row.listingId !== guard.listingId || new Date(row.listingVersion).toISOString() !== guard.listingVersion || row.connectionId !== guard.connectionId ||
           row.connectionVersion !== guard.connectionVersion || row.configHash !== guard.configHash || row.grantHash !== guard.grantHash ||
           row.operation !== guard.operation || row.operation === "inspect" || row.revision !== claim.revision || row.state !== "preparing" ||
-          Date.parse(row.leaseUntil) <= now.getTime() || resource.retiredAt) throw new InventoryPersistenceError("stale");
-        await liveSession(tx, claim.ownerId, guard.sessionId, now);
+          Date.parse(row.leaseUntil) <= now.getTime() || resource.retiredAt || session.expiresAt.getTime() <= now.getTime() ||
+          Date.parse(connection.refreshExpiresAt!) <= now.getTime()) throw new InventoryPersistenceError("stale");
         const [changed] = await tx.update(attempts).set({ ...data, intentAt: now.toISOString(), state: "fenced", revision: row.revision + 1,
           updatedAt: now.toISOString() }).where(and(eq(attempts.id, row.id), eq(attempts.revision, claim.revision))).returning();
         return claimValue(changed, claim.token);
@@ -127,10 +135,10 @@ export class DrizzleEbayInventoryRepository {
   }
   async acknowledge(input: InventoryClaim, raw: unknown): Promise<{ evidenceId: string; late: boolean; revision: number; canStage: false; canDelete: false }> {
     return this.protect(async () => {
-      const claim = inventoryClaimSchema.parse(input), envelope = normalizeInventoryEvidence(raw), now = this.clock();
-      if (Date.parse(envelope.finishedAt) > now.getTime()) throw new InventoryPersistenceError("invalid");
+      const claim = inventoryClaimSchema.parse(input), envelope = normalizeInventoryEvidence(raw);
       return this.db.transaction(async tx => {
-        const { row } = await this.locked(tx, claim);
+        const { row } = await this.locked(tx, claim), now = await wallTime(tx);
+        if (Date.parse(envelope.finishedAt) > now.getTime()) throw new InventoryPersistenceError("invalid");
         // SQL owns canonical fingerprinting, budget enforcement, late detection,
         // append-only acknowledgement and monotonic hold/state transitions.
         const [inserted] = await tx.insert(evidence).values({ id: randomUUID(), ownerId: claim.ownerId, resourceId: claim.resourceId, attemptId: claim.id,
@@ -146,9 +154,9 @@ export class DrizzleEbayInventoryRepository {
   }
   async retireUnfenced(input: InventoryClaim): Promise<void> {
     return this.protect(async () => {
-      const claim = inventoryClaimSchema.parse(input), now = this.clock();
+      const claim = inventoryClaimSchema.parse(input);
       await this.db.transaction(async tx => {
-        const { row } = await this.locked(tx, claim);
+        const { row } = await this.locked(tx, claim), now = await wallTime(tx);
         if (row.revision !== claim.revision || row.intentAt || row.state !== "preparing" || Date.parse(row.leaseUntil) > now.getTime()) throw new InventoryPersistenceError("stale");
         await tx.update(attempts).set({ state: "retired", revision: row.revision + 1, updatedAt: now.toISOString() }).where(and(eq(attempts.id, row.id), eq(attempts.revision, row.revision)));
       });
@@ -162,7 +170,7 @@ export class DrizzleEbayInventoryRepository {
         const [known] = await tx.select().from(resources).where(and(eq(resources.id, resourceId), eq(resources.ownerId, owner)));
         if (!known) throw new InventoryPersistenceError("stale");
         await sellerGuard(tx, known.sellerKey);
-        const [changed] = await tx.update(resources).set({ retiredAt: this.clock().toISOString(), hold: "seller", revision: revision + 1,
+        const [changed] = await tx.update(resources).set({ retiredAt: sql`clock_timestamp()`, hold: "seller", revision: revision + 1,
           currentListingId: null, currentConnectionId: null }).where(and(eq(resources.id, resourceId), eq(resources.ownerId, owner), eq(resources.revision, revision), isNull(resources.retiredAt))).returning();
         if (!changed) throw new InventoryPersistenceError("stale");
       });
