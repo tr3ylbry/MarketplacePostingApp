@@ -260,7 +260,7 @@ it("enforces strict evidence and 64 KiB/250-reference budgets in direct SQL too"
     return db.insert(e).values({ id:randomUUID(),resourceId:c.resourceId,ownerId:owner,attemptId:c.id,expectedRevision:0,
       late:false,createdAt:now.toISOString(),fingerprint:inventoryDigest(randomUUID()),envelope:value as InventoryEvidence }).returning();
   }
-  for(const change of [{ item:null },{ rawBody:"forbidden" },{ related:[{ kind:"offer",id:"a".repeat(201) }] }]) await expect(insert({ ...envelope(),...change })).rejects.toThrow();
+  for(const change of [{ item:null },{ rawBody:"forbidden" },{ related:[{ kind:null,id:"safe" }] },{ related:[{ kind:"offer",id:"a".repeat(201) }] }]) await expect(insert({ ...envelope(),...change })).rejects.toThrow();
   const [saved]=await insert(envelope({ related:Array.from({ length:251 },(_,n)=>({ kind:"offer",id:"test_"+n })) }));
   expect(saved.envelope).toMatchObject({ item:"unknown",coverage:"incomplete",overflow:true,related:[] });
   expect(Buffer.byteLength(JSON.stringify(saved.envelope))).toBeLessThanOrEqual(65536);
@@ -349,4 +349,9 @@ it("serializes disconnect against claim with retained history or a clean rejecti
   expect(result[1].status).toBe("fulfilled");expect(await repository.projection(owner,listingId)).toBeNull();
   if(result[0].status==="fulfilled") expect(await resource(result[0].value.resourceId)).toMatchObject({ hold:"seller",currentConnectionId:null });
   else expect(result[0].reason).toMatchObject({ code:"stale" });
+});
+it("retains pre-claim observations as late/stale evidence without activating a current acknowledgement", async () => {
+  const c=await claim(), before=new Date(now.getTime()-1000).toISOString();
+  const result=await repository.acknowledge(c,envelope({ startedAt:before,finishedAt:before }));
+  expect(result.late).toBe(true);expect((await attempt(c.id)).state).toBe("preparing");expect((await resource(c.resourceId)).hold).toBe("resource");
 });

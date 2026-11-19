@@ -128,7 +128,7 @@ BEGIN
   END IF;
  END IF;
  IF NOT isfinite(NEW.created_at) OR NOT isfinite(NEW.review_due_at) OR
-  (NEW.retired_at IS NOT NULL AND NOT isfinite(NEW.retired_at)) THEN RAISE EXCEPTION 'Invalid Inventory dates'; END IF;
+  (NEW.retired_at IS NOT NULL AND (NOT isfinite(NEW.retired_at) OR NEW.retired_at<NEW.created_at)) THEN RAISE EXCEPTION 'Invalid Inventory dates'; END IF;
  RETURN NEW;
 END $$;
 --> statement-breakpoint
@@ -226,7 +226,7 @@ BEGIN
  END LOOP;
  FOR ref IN SELECT value FROM jsonb_array_elements(e->'related') LOOP
   IF jsonb_typeof(ref)<>'object' OR NOT ref ?& ARRAY['kind','id'] OR (ref-ARRAY['kind','id'])<>'{}'::jsonb OR
-   ref->>'kind' NOT IN ('offer','listing','group') OR jsonb_typeof(ref->'id')<>'string' OR
+   jsonb_typeof(ref->'kind')<>'string' OR ref->>'kind' NOT IN ('offer','listing','group') OR jsonb_typeof(ref->'id')<>'string' OR
    length(ref->>'id') NOT BETWEEN 1 AND 200 OR ref->>'id' !~ '^[A-Za-z0-9_-]+$' THEN RETURN false; END IF;
  END LOOP;
  RETURN true;
@@ -261,7 +261,7 @@ BEGIN
   -- Preserve the normalized input fingerprint across budget downgrades, so an
   -- identical local acknowledgement remains idempotent after partial capture.
  END IF;
- NEW.late := NEW.expected_revision<>a.revision OR a.state IN ('retired','conflict') OR
+ NEW.late := NEW.expected_revision<>a.revision OR a.state IN ('retired','conflict') OR (NEW.envelope->>'startedAt')::timestamptz<a.created_at OR
    r.current_listing_id IS NULL OR r.current_connection_id IS NULL OR r.retired_at IS NOT NULL OR
    a.lease_until<=NEW.created_at OR NOT EXISTS(SELECT 1 FROM public.listings l JOIN public.ebay_connections c ON c.owner_id=l.owner_id
     WHERE l.id=a.listing_id AND l.owner_id=a.owner_id AND l.updated_at=a.listing_version
