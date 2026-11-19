@@ -1,5 +1,7 @@
 # Internal Inventory Item planning — writes disabled
 
+The later [Inventory persistence slice](ebay-inventory-persistence.md) adds internal local history only. This pure planner still has no runtime entrypoint or trusted provenance issuer, and its staging/deletion permissions remain false.
+
 This bounded Stage 9B slice adds a **pure local planner and safety decisions**, not Inventory staging. There is no runtime composition, HTTP client, database change, route, action, UI, OAuth grant or provider write. Existing preparation `canStage` flags remain false. Real EPS transport and receipt admission remain disabled; Stage 9B remains In Progress.
 
 ## Contract and mapping
