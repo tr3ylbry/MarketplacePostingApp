@@ -102,3 +102,4 @@ export const reverbManagementLeases = pgTable("reverb_management_leases", {
   environment: reverbEnvironment("environment").notNull(),
   token: text("token").notNull(), expiresAt: instant("expires_at").notNull(),
 }, t => [primaryKey({ columns: [t.listingId, t.environment] })]);
+export * from "./ebayCaptureSchema";

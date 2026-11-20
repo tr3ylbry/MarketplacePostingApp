@@ -1,5 +1,7 @@
 # Proposed real Sandbox media records and transfer
 
+**November 20 follow-up:** the separately authorized [capture-only discovery implementation](ebay-image-response-discovery.md) adds a manual pinned client, structural evidence channel and explicit discovery OAuth-profile preparation. It does not enable normal transport, real receipt/association admission or any real experiment. Earlier proposal/unimplemented wording below records its original checkpoint; later accepted privacy/persistence decisions remain effective.
+
 Reviewed design, 2026-11-16, against development baseline `b04159870a030d070b6d757c4187979feb92f69e`. The separately authorized [persistence slice](ebay-real-media-persistence.md) implements records, guarded transitions and a disposable-tested migration. The [internal fake-only workflow](ebay-fake-media-workflow.md) now composes authenticated one-use review, the exact proposed synthetic grant, accepted derivatives and persistence with bounded fake sends. The rest remains proposed: **no real uploader, real media authorization profile, production orchestration, real URL admission or provider acceptance is implemented.** Stage 9B remains In Progress; real EPS stays hard-disabled. The next implementation requires separate approval. Inventory, offers, publication, remote attachment, background synchronization and generic HTTP proxying are excluded.
 
 ## Evidence and current boundary

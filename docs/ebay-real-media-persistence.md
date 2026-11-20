@@ -1,5 +1,7 @@
 # Real media persistence foundation — transport disabled
 
+**November 20 follow-up:** the separately authorized [capture-only discovery implementation](ebay-image-response-discovery.md) adds a manual pinned client, structural evidence channel and explicit discovery OAuth-profile preparation. It does not enable normal transport, real receipt/association admission or any real experiment. Earlier proposal/unimplemented wording below records its original checkpoint; later accepted privacy/persistence decisions remain effective.
+
 This implements the persistence slice of the [reviewed real-media design](ebay-real-media-design.md): bounded records, repository transitions and SQL protections. The subsequent [internal fake-only workflow](ebay-fake-media-workflow.md) composes these transitions with authenticated review and accepted derivatives. Neither creates a real EPS resource or establishes real response/URL admission. The existing simulation table, recipe, constraints, fake transport and normal runtime composition are unchanged. **Real EPS stays hard-disabled; Stage 9B remains In Progress.** No route, server action, upload UI, real OAuth media profile, provider client or background job is added.
 
 ## Records and binding

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ownerIdSchema } from "./owner";
-import { ebayScopesFor, sameEbayScopes, hasEbayReadinessScopes, validEbayScopes, EbayError, type EbayAuthorizationProfile, type EbayConfig, type EbayConnection, type EbayConnectionRepository, type EbayGateway, type EbayTokens, type TokenEnvelope } from "./ebayConnection";
+import { EBAY_DISCOVERY_SCOPES, ebayScopesFor, sameEbayScopes, hasEbayReadinessScopes, validEbayScopes, EbayError, type EbayAuthorizationProfile, type EbayConfig, type EbayConnection, type EbayConnectionRepository, type EbayGateway, type EbayTokens, type TokenEnvelope } from "./ebayConnection";
 interface Cipher { encrypt(value: string, aad: string): TokenEnvelope; decrypt(value: TokenEnvelope, aad: string): string }
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const stateValue = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -22,10 +22,11 @@ export function createEbayConnectionService(repo: EbayConnectionRepository, gate
   // Server-only token context binds a readiness read to the exact row/refresh CAS.
   const context = (token: string, row: EbayConnection) => ({ token, connectionId: row.id, version: row.version, sellerId: row.sellerId! });
   async function accessContext(owner: string, profile: EbayAuthorizationProfile = "identity") {
-    if (profile !== "identity" && profile !== "readiness") throw new EbayError("scopes");
+    if (profile !== "identity" && profile !== "readiness") throw new EbayError("scopes"); // Discovery never uses implicit refresh.
     ownerIdSchema.parse(owner); const row = await repo.connection(owner), now = clock();
     if (!row || row.ownerId !== owner || row.environment !== "sandbox" || row.status !== "connected" || row.configHash !== config.fingerprint || !row.sellerId || !row.access || !row.refresh || !row.refreshExpiresAt || row.refreshExpiresAt <= now.toISOString()) throw new EbayError("auth");
     if (!validEbayScopes(row.scopes)) throw new EbayError("scopes");
+    if (sameEbayScopes(row.scopes, EBAY_DISCOVERY_SCOPES)) throw new EbayError("permissions"); // No normal discovery-token use or hidden refresh.
     if (!ebayScopesFor(profile).every(s => row.scopes.includes(s))) throw new EbayError("permissions");
     if (row.accessExpiresAt && row.accessExpiresAt > add(now, 60)) {
       try { return context(cipher.decrypt(row.access, aad(row, "access", row.sellerId)), row); }
@@ -52,7 +53,7 @@ export function createEbayConnectionService(repo: EbayConnectionRepository, gate
     status, accessContext,
     async begin(owner: string, sessionId: string, profile?: EbayAuthorizationProfile) {
       ownerIdSchema.parse(owner); if (!sessionId) throw new EbayError("state");
-      if (profile !== undefined && profile !== "identity" && profile !== "readiness") throw new EbayError("scopes");
+      if (profile !== undefined && profile !== "identity" && profile !== "readiness" && profile !== "media-discovery") throw new EbayError("scopes");
       const existing = await repo.connection(owner);
       const requested = [...ebayScopesFor(profile ?? (existing && hasEbayReadinessScopes(existing.scopes) ? "readiness" : "identity"))];
       const state = randomBytes(32).toString("base64url"), now = clock();

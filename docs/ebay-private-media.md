@@ -1,5 +1,7 @@
 # Private photo preparation; EPS transfer remains gated
 
+**November 20 follow-up:** the separately authorized [capture-only discovery implementation](ebay-image-response-discovery.md) adds a manual pinned client, structural evidence channel and explicit discovery OAuth-profile preparation. It does not enable normal transport, real receipt/association admission or any real experiment. Earlier proposal/unimplemented wording below records its original checkpoint; later accepted privacy/persistence decisions remain effective.
+
 This is the first small media slice after merged seller-readiness PR #10. It implements an explicit owner-authorized **local preparation** action, not EPS upload support. Real image transport and a media-write OAuth profile remain unimplemented. A separate fake-tested attempt foundation below exercises durable fencing using generated fixtures only. The disabled real-upload control has no real uploader behind it; no runtime environment switch enables real transfer.
 
 ## Implemented boundary

@@ -33,7 +33,7 @@ export interface RealMediaBinding {
   sellerKey: string; sourceVersion: string; imageOrder: number;
 }
 export interface RealMediaSnapshot extends RealMediaBinding { mediaGrant: boolean; accessExpiresAt: string | null }
-export interface RealMediaReviewGuard { binding: RealMediaSnapshot; sessionId: string }
+export interface RealMediaReviewGuard { binding: RealMediaSnapshot; sessionId: string; leaseDeadline?: string }
 export const mediaSessionHash = (owner: string, sessionId: string) => realMediaDigest(JSON.stringify(["media-session-v1", owner, sessionId]));
 export interface RealMediaRepository {
   snapshot(owner: string, listingId: string, imageId: string): Promise<RealMediaSnapshot>;

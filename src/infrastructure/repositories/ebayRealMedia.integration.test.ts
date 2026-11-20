@@ -191,8 +191,10 @@ it.each(["listing", "image", "reorder", "source", "connection", "grant", "discon
   expect(await repository.acknowledge(c, p)).toEqual({ state: "residual", associated: false });
   expect(await receiptRows(c.id)).toHaveLength(1); expect((await record(c.id)).postIntentAt).not.toBeNull();
 });
-it("capture-only evidence cannot acquire a current association", async () => {
-  const c = await fence({ operation: "capture-only" }); expect(await repository.acknowledge(c, await proof(c))).toEqual({ state: "residual", associated: false });
+it("capture-only without the explicit live media session cannot enter the receipt lifecycle", async () => {
+  await expect(fence({ operation: "capture-only" })).rejects.toThrow();
+  expect(await db.select().from(s).where(eq(s.ownerId, owner))).toHaveLength(0);
+  expect(await db.select().from(r).innerJoin(a, eq(a.id, r.attemptId)).where(eq(a.ownerId, owner))).toHaveLength(0);
 });
 it("detects later deletion/expiry in a local status read without erasing a receipt or fence", async () => {
   const c = await fence(); await repository.acknowledge(c, await proof(c)); await change("image");

@@ -3,13 +3,15 @@ export const EBAY_READINESS_SCOPES = [...EBAY_SCOPES,
   "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
 ] as const;
-export type EbayAuthorizationProfile = "identity" | "readiness";
-export const ebayScopesFor = (profile: EbayAuthorizationProfile): readonly string[] => profile === "readiness" ? EBAY_READINESS_SCOPES : EBAY_SCOPES;
+// Explicit manual discovery profile; no ordinary settings action requests it.
+export const EBAY_DISCOVERY_SCOPES = [...EBAY_SCOPES,"https://api.ebay.com/oauth/api_scope/sell.inventory"] as const;
+export type EbayAuthorizationProfile = "identity" | "readiness" | "media-discovery";
+export const ebayScopesFor = (profile: EbayAuthorizationProfile): readonly string[] => profile === "readiness" ? EBAY_READINESS_SCOPES : profile === "media-discovery" ? EBAY_DISCOVERY_SCOPES : EBAY_SCOPES;
 export function sameEbayScopes(actual: readonly string[], expected: readonly string[]) {
   return actual.length === expected.length && new Set(actual).size === actual.length && expected.every(s => actual.includes(s));
 }
 export const hasEbayReadinessScopes = (scopes: readonly string[]) => sameEbayScopes(scopes, EBAY_READINESS_SCOPES);
-export const validEbayScopes = (scopes: readonly string[]) => sameEbayScopes(scopes, EBAY_SCOPES) || hasEbayReadinessScopes(scopes);
+export const validEbayScopes = (scopes: readonly string[]) => sameEbayScopes(scopes, EBAY_SCOPES) || hasEbayReadinessScopes(scopes) || sameEbayScopes(scopes,EBAY_DISCOVERY_SCOPES);
 export interface EbayConfig { clientId: string; clientSecret: string; ruName: string; origin: string; fingerprint: string }
 // The base identity grant remains unchanged. Seller checks require a separate,
 // explicit read-only authorization profile; neither profile permits resource writes.

@@ -78,6 +78,13 @@
       "when": 1795106131051,
       "tag": "0010_ebay_inventory_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795208132176,
+      "tag": "0011_sandbox_image_capture",
+      "breakpoints": true
     }
   ]
 }
