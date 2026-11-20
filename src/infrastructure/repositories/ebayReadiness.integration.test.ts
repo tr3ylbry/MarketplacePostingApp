@@ -103,9 +103,9 @@ it("cannot switch seller identity while upgrading an existing connection", async
   const after = (await repo.connection(owner))!;
   expect(after.access).toEqual(before.access); expect(after.refresh).toEqual(before.refresh); expect(after.sellerId).toBe(before.sellerId); expect(after.scopes).toEqual(before.scopes);
 });
-it("rejects broader write permissions before creating an authorization state", async () => {
+it("rejects silently combined readiness/write permissions before creating an authorization state", async () => {
   const before = await repo.connection(owner);
-  await expect(repo.begin(owner, "session", config.fingerprint, "state", now.toISOString(), new Date(now.getTime() + 600000).toISOString(), [...EBAY_SCOPES, "https://api.ebay.com/oauth/api_scope/sell.inventory"])).rejects.toThrow();
+  await expect(repo.begin(owner, "session", config.fingerprint, "state", now.toISOString(), new Date(now.getTime() + 600000).toISOString(), [...EBAY_READINESS_SCOPES, "https://api.ebay.com/oauth/api_scope/sell.inventory"])).rejects.toThrow();
   expect(await repo.connection(owner)).toEqual(before); expect(oauth.exchange).not.toHaveBeenCalled();
 });
 it("upgrades only after identity validation, keeps AAD/config stable, and reconnect retains the granted profile", async () => {

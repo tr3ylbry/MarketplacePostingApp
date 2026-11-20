@@ -1,5 +1,7 @@
 # Internal fake-only media workflow
 
+**November 20 follow-up:** the separately authorized [capture-only discovery implementation](ebay-image-response-discovery.md) adds a manual pinned client, structural evidence channel and explicit discovery OAuth-profile preparation. It does not enable normal transport, real receipt/association admission or any real experiment. Earlier proposal/unimplemented wording below records its original checkpoint; later accepted privacy/persistence decisions remain effective.
+
 This slice composes the accepted [photo derivative](photo-derivatives.md) and [real-media persistence](ebay-real-media-persistence.md) boundaries. It has **no route, server action, UI, production factory or runtime switch**. The existing normal media runtime still returns disabled, and real receipt admission still always rejects. This is simulated orchestration evidence, not eBay upload, ingestion or recovery acceptance. Stage 9B remains In Progress.
 
 ## Authentication, grant and one-use review

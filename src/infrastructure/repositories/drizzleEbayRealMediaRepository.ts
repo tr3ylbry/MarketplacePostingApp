@@ -81,6 +81,7 @@ export class DrizzleEbayRealMediaRepository implements RealMediaRepository {
   async claim(input: RealMediaContext, guard?: RealMediaReviewGuard): Promise<RealMediaClaim> {
     return this.protect(async () => {
       const value = realMediaContextSchema.parse(input), now = this.clock(), token = randomUUID();
+      if (value.operation === "capture-only" && (!guard || !z.iso.datetime().safeParse(guard.leaseDeadline).success)) throw new RealMediaError("stale");
       return this.db.transaction(async tx => {
         const current = await context(tx, value.ownerId, value.listingId, value.imageId, now);
         if (!current || current.listingVersion !== value.listingVersion || current.configHash !== value.configHash) throw new RealMediaError("stale");
@@ -105,7 +106,7 @@ export class DrizzleEbayRealMediaRepository implements RealMediaRepository {
           configHash: current.configHash, grantHash: current.grantHash, sellerKey: current.sellerKey, sourceVersion: current.sourceVersion, imageOrder: current.imageOrder,
           id: randomUUID(), environment: "sandbox", state: "preparing",
           revision: 0, claimHash: realMediaDigest(token),
-          leaseUntil: new Date(now.getTime() + REAL_MEDIA_LEASE_MS).toISOString(), updatedAt: now.toISOString() };
+          leaseUntil: new Date(Math.min(now.getTime() + REAL_MEDIA_LEASE_MS, value.operation === "capture-only" ? Date.parse(guard!.leaseDeadline!) : Infinity)).toISOString(), updatedAt: now.toISOString() };
         const [row] = await tx.insert(attempts).values({ ...values, createdAt: now.toISOString() }).returning();
         await tx.update(schema.listingImages).set({ providerRetainUntil: sql`greatest(${schema.listingImages.providerRetainUntil}, ${new Date(now.getTime() + PRIVATE_IMAGE_REVIEW_MS + CLEANUP_GRACE_MS).toISOString()}::timestamptz)` }).where(eq(schema.listingImages.id, value.imageId));
         return { id: row.id, ownerId: row.ownerId, listingId: row.listingId, imageId: row.imageId, token, revision: row.revision, sessionHash: row.sessionHash, actionHash: row.actionHash };

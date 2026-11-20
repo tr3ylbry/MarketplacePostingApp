@@ -1,0 +1,61 @@
+# Sandbox image-response discovery — capture only
+
+This separately reviewed implementation advances the [real-media design](ebay-real-media-design.md#alternative-capture-only-discovery-proposal). It does not enable normal EPS transport, real receipt/association admission, Inventory writes, offers or publication. **Stage 9B remains In Progress. No real experiment has run.** The existing simulation contracts and normal runtime stay closed.
+
+## Manual entry and exact scope
+
+`scripts/ebay-capture-discovery.ts` is never imported by navigation, Save, server actions, jobs or the normal runtime. No environment toggle enables it. Its real modes require an explicit command flag, the exact reviewed Git head, a clean tracked checkout, local PostgreSQL, the existing authenticated app session and a privately verified seller fingerprint. It rechecks the reviewed checkout immediately before sending. The cookie is entered at a hidden local TTY prompt, not a command argument or stored file. It must belong to the same HTTPS browser session used for consent. The tool never prints a cookie, credential, authorization URL/code, account label or raw error.
+
+The only image request destination is the constant:
+
+```text
+POST https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file
+```
+
+Node HTTPS uses normal certificate validation, no pooled agent, no redirect following, no retry and no configurable destination. There is no getImage, HEAD, download, URL-upload or alternate-host operation. Unexpected status, content, transport failure or cancellation still consumes any committed fence. A successful structural capture remains **unknown**, not confirmed/associated or permission for another POST.
+
+The [current Media OpenAPI v1_beta.5.0](https://developer.ebay.com/api-docs/master/commerce/media/openapi/3/commerce_media_v1_beta_oas3.json) describes multipart field `image`, JSON ImageResponse fields and HTTP 201/Location; its server examples are Production. They are not Sandbox output or URL-format proof. [Image guidance](https://developer.ebay.com/api-docs/sell/static/inventory/managing-image-media.html) permits EPS processing. No byte preservation, exact 12 MB/15,000-pixel acceptance boundary, ICC/alpha behavior or reliable Sandbox lost-response recovery is assumed. Private correspondence and captures remain in private project records.
+
+## Fixture, privacy and wire bounds
+
+Generate one new visibly marked, non-personal **500×600 static RGB PNG**, without alpha or identifying metadata. The manual fixture command writes a new owner-only file and refuses overwrite. Upload that approved file through the existing private-image workflow only after separately authorized setup; record its source SHA-256 privately. Capture requires that exact source digest. It passes through the existing retained, owner-scoped [derivative boundary](photo-derivatives.md); originals remain unchanged. Final PNG dimensions, recipe, byte count and derivative digest must match. No original-byte fallback exists.
+
+Application budgets (not eBay maxima): source/final PNG at most **1 MiB**, multipart framing at most **2 KiB**, response body **64 KiB**, aggregate response headers **16 KiB**, at most 128 header pairs, **10 seconds** HTTP inside **30 seconds** whole-operation eligibility, and the existing shared two photo-operation slots with no queue. Source retention is at least six minutes. The original derivative's 15-second/native bounds remain unchanged.
+
+The actual Node parser enforces the header byte cap before exposing headers, retaining duplicate visibility through `rawHeaders`. Every response status, including errors, is bounded. Chunked bodies are counted into one 64 KiB buffer before parsing/copying; compressed bodies, trailers and informational/upgrade responses are not admitted. Redirects are captured without reading/following their targets. Fatal UTF-8, bounded JSON depth/token/key/string traversal and duplicate decoded-key detection precede JSON object parsing. Arbitrary provider text and unknown fields are discarded. These are framing/admission bounds, not a process RSS quota; native work/socket settlement may outlast eligibility. Capacity remains reserved until started work settles.
+
+The manual source reader passes an existing Blob token, or an explicitly provisioned OIDC token/store ID, directly to the SDK. It never uses implicit CLI/Keychain discovery or credential refresh. Missing/expired credentials fail closed without fallback. The ordinary application's storage configuration is unchanged; actual-SDK tests block external network and make implicit discovery fatal.
+
+## Structural evidence is not URL trust
+
+Only fixed-schema facts may persist: status, outcome code, expected-field value types, syntactic scheme/ASCII DNS hostname, port/query/fragment/user-info presence, bounded path-segment lengths/shapes/encoding flags, and independently valid UTC expiration syntax/value. Segment contents, resource IDs, whole URLs, query/user-info/fragment values, raw bodies/headers, paths, filenames, credentials and image bytes never enter the report.
+
+`valid` in a URL shape means syntactically parseable HTTP(S), **not trusted, downloadable or admitted**. Unexpected hosts are observations, not allowlist additions. URL components reflect the standard URL parser's normalization; raw encoding/dot-segment equivalence is not established. No field is ever used to make another request. One observation cannot prove all permitted variants, TLS/download authentication, redirects, ingestion or erasure.
+
+Migration `0011_sandbox_image_capture` adds only `ebay_media_captures`: append-only reports, attempt FK RESTRICT, canonical fingerprint/idempotency and at most four bounded reports per attempt. SQL independently validates the fixed report shape (at most 8 KiB), rejects arbitrary text/fields, and requires a fenced capture-only unknown attempt. It is not a receipt table. SQL forbids capture receipts, confirmed/residual states and operation conversion; existing real/simulation receipt contracts are unchanged.
+
+## Durable authorization and uncertainty
+
+The workflow derives owner/session and exact seller/listing/image/order/connection/configuration/grant bindings from trusted local repositories. Opaque process-bound reviews burn synchronously before asynchronous work. One manually composed runner consumes at most one confirmation, even after a pre-send failure. It claims `capture-only`, commits retention, derives/verifies bytes outside transactions, obtains a current version-bound token without refresh, and commits both permanent seller/source and seller/derivative content fences before the single HTTP call.
+
+Capture-specific SQL checks live session, access/refresh credential and lease expiry with **`clock_timestamp()` after locking**; fail-fast context rechecks use NOWAIT. Backdated caller timestamps or an old transaction cannot authorize an expired fence. Capture leases are shortened to the whole-operation deadline and cannot renew. After `beforeSend`, the workflow completes its last owned context/snapshot read, then performs the final post-lock SQL authorization against the exact immutable context and claim. No asynchronous context read follows that authorization. It verifies the final byte digest and rechecks cancellation, operation/review deadlines and local configuration immediately before capture. A snapshot delayed beyond credential expiry therefore cannot authorize a send using its earlier timestamp; any committed fences remain unknown/unassociated. No HTTP, storage, OAuth or native processing holds a transaction. The final-check-to-network race is not cross-system atomicity; late changes cannot yield an association.
+
+Consumed actions, old claim IDs/tokens/revisions, source and derivative fences survive reclamation, reconnect, local deletion and process restart. Reclamation retires an expired unfenced row and inserts a new row. Unknown fence commits stop before send. Unknown response/DB outcomes never retry HTTP. Only an identical local report acknowledgement may retry once. Late/contradictory structural evidence remains append-only and cannot activate a projection or clear uncertainty.
+
+## Explicit authorization prerequisite
+
+The manual `--approve-media-consent` mode prepares the exact profile **base `api_scope` + `sell.inventory`** using the existing one-use session-bound OAuth state/callback and authenticated Trading GetUser identity verification. It has no normal settings button and no fallback OAuth path. Failed/cancelled/wrong-seller authorization preserves previous encrypted credentials/grant. A successful replacement is atomic only after verifying the existing seller. This grant can authorize Inventory/Offer writes at eBay; application code continues to refuse them.
+
+This minimal profile **replaces readiness read permissions**. It does not silently combine account/inventory-read scopes. Normal token access/readiness actions refuse a discovery grant rather than refresh/use it implicitly. The capture runner decrypts only the exact current unexpired access credential; it cannot exchange, refresh or verify identity during capture. Normal readiness use later requires separately explicit read-only reauthorization. No real consent/token/identity operation occurred during implementation.
+
+## Local evidence and remaining run approval
+
+Focused tests use generated fixtures, local Node HTTP servers, synthetic credentials, signed Better Auth sessions and uniquely disposable PostgreSQL databases. They exercise actual multipart bytes/digests, redirects/no-follow, duplicate/oversized headers, chunked/error bodies, UTF-8/JSON ambiguity, redaction, expiry across real locks, rollback, immutable action/content history, lost acknowledgements, owner isolation, local deletion and late settlement. A regression demonstrates a blocked final snapshot crossing a genuinely future refresh deadline: zero capture calls, retained source/derivative fences, refused replay/restart and idempotent late structural evidence without receipt/association. Final session/access/refresh/lease expiry, cancellation/review expiry after authorization and a valid exactly-once control are covered separately. Existing tests preserve normal Save/navigation and disabled runtime behavior. Exact counts and exit codes belong to the PR.
+
+**Do not run the real modes until the owner approves an exact reviewed commit and private execution package.** Apply migration 0011 to development only in that separately authorized setup, along with any still-pending committed prerequisites. This PR applies migrations only in disposable databases.
+
+The published development notice still describes the earlier seller-connection checkpoint and says no eBay photos are sent. Its authentication/testing and media-flow disclosures need separate owner review/publication approval before consent or capture. This work does not modify the public notice or its contact/deletion provisions.
+
+Reports/fences have no TTL or purge/renewal/release service. Owner deletion remains RESTRICT. A proposed private report review at 30 days is a decision obligation, not automatic deletion or an already accepted retention policy. Media offboarding/required erasure needs a lawful minimal safety tombstone or mutation disablement before identifying history is erased; Inventory retention policy is not silently copied here. Local cleanup removes only the disposable listing/photos after retention; keep fences/capture history. **A remote image may remain. Neither returned expiry nor local cleanup proves remote erasure.**
+
+After one separately approved capture, stop for a narrow URL-contract review. Any download or visual-ingestion experiment needs a new reviewed budget and must preserve the discovery fences.
