@@ -20,7 +20,7 @@ import { DrizzleImageRepository } from "../src/infrastructure/repositories/drizz
 import { DrizzleEbayConnectionRepository } from "../src/infrastructure/repositories/drizzleEbayConnectionRepository";
 import { DrizzleEbayRealMediaRepository } from "../src/infrastructure/repositories/drizzleEbayRealMediaRepository";
 import { DrizzleMediaCaptureRepository } from "../src/infrastructure/repositories/drizzleMediaCaptureRepository";
-import { VercelBlobImageStorage } from "../src/infrastructure/storage/vercelBlobImageStorage";
+import { captureSource } from "../src/infrastructure/storage/captureSource";
 import { photoTransformer,PHOTO_RECIPE } from "../src/infrastructure/storage/photoDerivative/transformPhoto";
 import { ebayConfig } from "../src/infrastructure/ebay/config";
 import { EbayClient } from "../src/infrastructure/ebay/ebayClient";
@@ -70,9 +70,9 @@ async function main() {
    const browser=spawn("open",[url],{stdio:"ignore"});await new Promise<void>((resolve,reject)=>{browser.on("error",()=>reject(Error()));browser.on("close",c=>c===0?resolve():reject(Error()));});
    console.log("Opened the single approved Sandbox consent. The local HTTPS app must remain running. No capture was started.");return;
   }
-  if(!v.listing||!v.image||!mediaHash.safeParse(v["source-digest"]).success||!sameEbayScopes(row.scopes,EBAY_DISCOVERY_SCOPES)||!row.accessExpiresAt||Date.parse(row.accessExpiresAt)<=Date.now()+120000||!process.env.BLOB_READ_WRITE_TOKEN)throw Error();
+  if(!v.listing||!v.image||!mediaHash.safeParse(v["source-digest"]).success||!sameEbayScopes(row.scopes,EBAY_DISCOVERY_SCOPES)||!row.accessExpiresAt||Date.parse(row.accessExpiresAt)<=Date.now()+120000)throw Error();
   const evidence=new DrizzleMediaCaptureRepository(db),repository=new DrizzleEbayRealMediaRepository(db),client=createCaptureClient();
-  const derivative=createPhotoDerivativeService(new DrizzleListingRepository(db),new DrizzleImageRepository(db),connections,new VercelBlobImageStorage(),photoTransformer,config.fingerprint);
+  const derivative=createPhotoDerivativeService(new DrizzleListingRepository(db),new DrizzleImageRepository(db),connections,captureSource(process.env),photoTransformer,config.fingerprint);
   const workflow=createCaptureWorkflow({session,repository,evidence,derive:derivative.derive,configHash:()=>config.fingerprint,recipe:()=>PHOTO_RECIPE,capture:async(bytes,token,signal)=>{if(execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim()!==v["reviewed-head"]||execFileSync("git",["status","--porcelain","--untracked-files=no"],{encoding:"utf8"}).trim())throw Error();return client.capture(bytes,token,signal);},
    async credential(binding){const current=await connections.connection(actor.ownerId);if(!current||current.ownerId!==binding.ownerId||current.id!==binding.connectionId||current.version!==binding.connectionVersion||current.sellerId!==binding.sellerKey||current.configHash!==binding.configHash||!sameEbayScopes(current.scopes,EBAY_DISCOVERY_SCOPES)||!current.access||!current.accessExpiresAt||Date.parse(current.accessExpiresAt)<=Date.now()+30000)throw Error();return cipher.decrypt(current.access,JSON.stringify(["ebay-oauth-v1","access",current.ownerId,"sandbox",current.id,current.configHash,current.sellerId]));}});
   const outcome=await workflow.confirm(await workflow.prepare(v.listing,v.image,v["seller-key"]!,v["source-digest"]!),cancel.signal);

@@ -24,6 +24,8 @@ Application budgets (not eBay maxima): source/final PNG at most **1 MiB**, multi
 
 The actual Node parser enforces the header byte cap before exposing headers, retaining duplicate visibility through `rawHeaders`. Every response status, including errors, is bounded. Chunked bodies are counted into one 64 KiB buffer before parsing/copying; compressed bodies, trailers and informational/upgrade responses are not admitted. Redirects are captured without reading/following their targets. Fatal UTF-8, bounded JSON depth/token/key/string traversal and duplicate decoded-key detection precede JSON object parsing. Arbitrary provider text and unknown fields are discarded. These are framing/admission bounds, not a process RSS quota; native work/socket settlement may outlast eligibility. Capacity remains reserved until started work settles.
 
+The manual source reader passes an existing Blob token, or an explicitly provisioned OIDC token/store ID, directly to the SDK. It never uses implicit CLI/Keychain discovery or credential refresh. Missing/expired credentials fail closed without fallback. The ordinary application's storage configuration is unchanged; actual-SDK tests block external network and make implicit discovery fatal.
+
 ## Structural evidence is not URL trust
 
 Only fixed-schema facts may persist: status, outcome code, expected-field value types, syntactic scheme/ASCII DNS hostname, port/query/fragment/user-info presence, bounded path-segment lengths/shapes/encoding flags, and independently valid UTC expiration syntax/value. Segment contents, resource IDs, whole URLs, query/user-info/fragment values, raw bodies/headers, paths, filenames, credentials and image bytes never enter the report.
