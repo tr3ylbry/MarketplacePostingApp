@@ -57,8 +57,11 @@ export function createCaptureWorkflow(deps:CaptureDependencies) {
         if(photo.sourceDigest!==r.sourceDigest||photo.recipe!==r.recipe||photo.contentType!=="image/png"||photo.width!==500||photo.height!==600||photo.size>CAPTURE_IMAGE_BYTES||photo.bytes.length!==photo.size||realMediaDigest(photo.bytes)!==photo.derivativeDigest)throw new RealMediaError("stale");
         const token=await deps.credential(b);await current(r,signal,end);
         claim=await deps.repository.fence(claim,{sourceDigest:photo.sourceDigest,derivativeDigest:photo.derivativeDigest,recipe:photo.recipe,contentType:photo.contentType,size:photo.size,width:photo.width,height:photo.height},r.guard);
-        await deps.repository.beforeSend(claim,r.guard);await deps.evidence.authorize(claim);await current(r,signal,end);
-        check(r,signal,end);if(realMediaDigest(photo.bytes)!==photo.derivativeDigest)throw new RealMediaError("stale");
+        await deps.repository.beforeSend(claim,r.guard);await current(r,signal,end);
+        // Authorize with database wall time after the last potentially blocking
+        // snapshot. No further asynchronous context reads precede capture.
+        await deps.evidence.authorize(claim);
+        if(realMediaDigest(photo.bytes)!==photo.derivativeDigest)throw new RealMediaError("stale");check(r,signal,end);
         // At most one call. Any uncertain fence/send/response leaves its durable
         // source AND derivative fences, including after restart or local deletion.
         const response=await deps.capture(photo.bytes,token,AbortSignal.any([signal,AbortSignal.timeout(CAPTURE_HTTP_MS)]));
