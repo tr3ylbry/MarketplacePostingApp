@@ -16,16 +16,32 @@ export function localDatabase(env: NodeJS.ProcessEnv): URL {
     const url = new URL(env.DATABASE_URL ?? "");
     if (env.VERCEL || !["127.0.0.1", "localhost"].includes(url.hostname) ||
       !/^postgres(?:ql)?:$/.test(url.protocol) || env.BETTER_AUTH_URL !== LOCAL_ORIGIN) throw Error();
+    // pg-connection-string decodes query names and uses the last duplicate;
+    // host/port there override the authority. Do not forward destination/file
+    // options or unknown selectors to its subsequent, filesystem-capable parse.
+    const allowed = new Set(["application_name", "connect_timeout", "options", "sslmode"]);
+    const seen = new Set<string>();
+    for (const [key, value] of url.searchParams) {
+      if (!allowed.has(key) || seen.has(key)) throw Error();
+      seen.add(key);
+      if (key === "sslmode" && !["disable", "prefer", "require", "verify-ca", "verify-full"].includes(value)) throw Error();
+    }
     return url;
   } catch { throw new LocalSessionError("configuration"); }
+}
+
+// Every manual pool uses the same validation before Pool can parse or connect.
+export function openLocalDatabasePool(env: NodeJS.ProcessEnv, kind: "session" | "execution") {
+  const url = localDatabase(env);
+  if (kind === "session") url.searchParams.set("options", "-c default_transaction_read_only=on");
+  return new Pool({ connectionString: url.toString(), max: kind === "session" ? 1 : 5,
+    ...(kind === "session" ? { connectionTimeoutMillis: 5000 } : {}) });
 }
 
 // Separate, strictly read-only connection used by ALL manual session reads.
 // This changes no normal application auth setting or cookie security attribute.
 export function openLocalSessionReader(env: NodeJS.ProcessEnv) {
-  const url = localDatabase(env);
-  url.searchParams.set("options", "-c default_transaction_read_only=on");
-  const pool = new Pool({ connectionString: url.toString(), max: 1, connectionTimeoutMillis: 5000 });
+  const pool = openLocalDatabasePool(env, "session");
   let unavailable = false;
   let closing: Promise<void> | undefined;
   pool.on("error", () => { unavailable = true; });

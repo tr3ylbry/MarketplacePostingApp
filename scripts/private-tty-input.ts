@@ -42,8 +42,11 @@ export function readPrivateInput(prompt: string, input: ReadStream = process.std
       const submit = bytes.length === 1 && (bytes[0] === 13 || bytes[0] === 10);
       for (const byte of bytes) {
         if (done) return;
-        if (byte === 3) { interrupted(); return; }
-        if (byte === 4) { eof(); return; }
+        if (byte === 3 || byte === 4) {
+          if (pasted) { fail("format"); escape = ""; continue; }
+          if (byte === 3) interrupted(); else eof();
+          return;
+        }
         const char = String.fromCharCode(byte);
         if (escape || byte === 27) {
           escape += char;

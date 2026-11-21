@@ -5,12 +5,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ReadStream, WriteStream } from "node:tty";
 import { config as loadEnv } from "dotenv";
-import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq } from "drizzle-orm";
 import { captureOptions } from "./capture-options";
 import { PrivateInputError, REHEARSAL_TEXT, localSessionCookie, readPrivateInput } from "./private-tty-input";
-import { LocalSessionError, localDatabase, openLocalSessionReader } from "./local-session";
+import { LocalSessionError, openLocalDatabasePool, openLocalSessionReader } from "./local-session";
 import type { RealMediaSnapshot } from "../src/application/ebayRealMedia";
 import * as schema from "../src/infrastructure/db/schema";
 
@@ -68,9 +67,9 @@ export async function runManualTool(args: string[], env: NodeJS.ProcessEnv = pro
       const { EbayClient } = await import("../src/infrastructure/ebay/ebayClient");
       const { EbayTokenCipher } = await import("../src/infrastructure/ebay/tokenCipher");
       const { createCaptureClient } = await import("../src/infrastructure/ebay/captureClient");
-      const config = ebayConfig(env), database = localDatabase(env);
+      const config = ebayConfig(env);
       const cancel = new AbortController(), interrupt = () => cancel.abort();
-      const pool = new Pool({ connectionString: database.toString(), max: 5 });
+      const pool = openLocalDatabasePool(env, "execution");
       pool.on("error", interrupt);
       process.once("SIGINT", interrupt);
       try {

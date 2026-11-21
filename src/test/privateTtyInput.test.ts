@@ -22,6 +22,59 @@ it("recognizes split bracketed-paste frames without stripping arbitrary controls
   t.submit(); expect(await pending).toBe(cookie); expect(t.input.isRaw).toBe(false);
 });
 
+it.each([3, 4].flatMap(control => [false, true].flatMap(initialRaw => [false, true].map(split => ({ control, initialRaw, split })))))("drains rejected paste containing control $control (raw=$initialRaw, split=$split) before settling", async ({ control, initialRaw, split }) => {
+    const t = privateTerminal(initialRaw), signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+    const counts = signals.map(s => process.listenerCount(s));
+    let settled: { code?: string; value?: string } | undefined;
+    const pending = readPrivateInput("Hidden: ", t.terminal.input, t.terminal.output);
+    const observed = pending.then(value => { settled = { value }; }, error => { settled = { code: error.code }; });
+    try {
+      for (const part of split ? ["\x1b[2", "00~", "harmless-before", String.fromCharCode(control)] :
+        ["\x1b[200~harmless-before" + String.fromCharCode(control)]) t.send(part);
+      await Promise.resolve();
+      expect(settled).toBeUndefined(); expect(t.input.isRaw).toBe(true);
+      expect(t.input.listenerCount("data")).toBe(1);
+      t.send("harmless-after"); t.submit(); // Enter inside unfinished paste is not submission.
+      await Promise.resolve(); expect(settled).toBeUndefined(); expect(t.input.isRaw).toBe(true);
+      for (const part of split ? ["\x1b[20", "1~"] : ["\x1b[201~"]) t.send(part);
+      await Promise.resolve(); expect(settled).toBeUndefined(); expect(t.input.isRaw).toBe(true);
+      t.send("more-harmless-content");
+      await Promise.resolve(); expect(settled).toBeUndefined();
+      t.submit(); await observed;
+      expect(settled).toEqual({ code: "format" }); expect(t.input.isRaw).toBe(initialRaw);
+      for (const event of ["data", "end", "close", "error"]) expect(t.input.listenerCount(event)).toBe(0);
+      expect(t.output.listenerCount("error")).toBe(0);
+      expect(signals.map(s => process.listenerCount(s))).toEqual(counts);
+      expect(t.text()).not.toMatch(/harmless-before|harmless-after|more-harmless-content/);
+    } finally {
+      // In-memory stream cleanup even when the pre-fix assertions fail.
+      if (!settled) t.input.emit("end");
+      await observed;
+    }
+  });
+
+it.each(["end", "error", "signal"])("still cleans up actual %s during an unfinished paste", async event => {
+  const t = privateTerminal(), pending = readPrivateInput("Hidden: ", t.terminal.input, t.terminal.output);
+  const rejected = expect(pending).rejects.toThrow("Private input unavailable.");
+  t.send("\x1b[200~harmless");
+  if (event === "signal") process.emit("SIGTERM"); else t.input.emit(event, Error("synthetic"));
+  await rejected; expect(t.input.isRaw).toBe(false); expect(t.input.listenerCount("data")).toBe(0);
+  expect(t.text()).not.toContain("harmless");
+});
+
+it.each([3, 4])("does not splice a closing frame across pasted control %s", async control => {
+  const t = privateTerminal(); let settled = false;
+  const pending = readPrivateInput("Hidden: ", t.terminal.input, t.terminal.output);
+  const observed = pending.then(() => { settled = true; return "unexpected"; }, error => { settled = true; return error.code; });
+  try {
+    t.send("\x1b[200~harmless\x1b[20"); t.send(String.fromCharCode(control)); t.send("1~more"); t.submit();
+    await Promise.resolve(); expect(settled).toBe(false); expect(t.input.isRaw).toBe(true);
+    t.send("\x1b[201~"); await Promise.resolve(); expect(settled).toBe(false);
+    t.submit(); expect(await observed).toBe("format"); expect(t.input.isRaw).toBe(false);
+    expect(t.text()).not.toContain("harmless");
+  } finally { if (!settled) t.input.emit("end"); await observed; }
+});
+
 it("allows intentional backspace before submission", async () => {
   const t = privateTerminal(), pending = readPrivateInput("Hidden: ", t.terminal.input, t.terminal.output);
   t.send("wrong\x7f\x7f\x7f\x7f\x7f" + cookie); t.submit(); expect(await pending).toBe(cookie);
