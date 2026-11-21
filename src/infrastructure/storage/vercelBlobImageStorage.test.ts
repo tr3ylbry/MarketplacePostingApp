@@ -7,14 +7,17 @@ const storage = new VercelBlobImageStorage();
 const upload: ImageUpload = { id: "4ea3182c-53f6-49ba-b208-aadf2e4d6e5b", listingId: "listing", pathname: "images/4ea3182c-53f6-49ba-b208-aadf2e4d6e5b/photo.png", filename: "photo.png", contentType: "image/png", size: 12, expiresAt: new Date(Date.now() + 300000).toISOString() };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_synthetic_fixture");
+  vi.stubEnv("VERCEL_OIDC_TOKEN", ""); vi.stubEnv("BLOB_STORE_ID", "");
   vi.mocked(issueSignedToken).mockResolvedValue({ delegationToken: "server-only", clientSigningToken: "server-only-key", validUntil: Date.parse(upload.expiresAt) });
   vi.mocked(presignUrl).mockResolvedValue({ presignedUrl: "https://private.example/short-lived-capability" });
 });
+afterEach(() => { vi.unstubAllEnvs(); });
 it("issues an exact-path private PUT with MIME/size/expiry limits, no overwrite, and no credential returned", async () => {
   expect(await storage.prepareUpload(upload)).toBe("https://private.example/short-lived-capability");
   expect(issueSignedToken).toHaveBeenCalledWith(expect.objectContaining({ pathname: upload.pathname, operations: ["put"], validUntil: Date.parse(upload.expiresAt), maximumSizeInBytes: 12, allowedContentTypes: ["image/png"] }));
   expect(presignUrl).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ pathname: upload.pathname, operation: "put", access: "private", allowOverwrite: false, addRandomSuffix: false }));
-  expect(vi.mocked(issueSignedToken).mock.calls[0][0]).not.toHaveProperty("token");
+  expect(vi.mocked(issueSignedToken).mock.calls[0][0]).toHaveProperty("token", "vercel_blob_rw_synthetic_fixture");
 });
 it("issues only a short-lived private GET with no cached application delivery", async () => {
   const before = Date.now(); await storage.createReadAccess(upload.pathname);
@@ -51,7 +54,7 @@ it("reads private bytes through the SDK with cancellation and no signed capabili
   vi.mocked(get).mockResolvedValue({ statusCode: 200, stream: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(12)); c.close(); } }), headers: new Headers(),
     blob: { pathname: source.pathname, size: 12, contentType: source.contentType, uploadedAt: new Date(), url: "https://private.example/object", downloadUrl: "https://private.example/object", contentDisposition: "inline", cacheControl: "private", etag: "etag" } });
   const signal = AbortSignal.timeout(1000); expect((await storage.readPrivateImage(source, signal)).length).toBe(12);
-  expect(get).toHaveBeenCalledWith(source.pathname, { access: "private", useCache: false, abortSignal: signal });
+  expect(get).toHaveBeenCalledWith(source.pathname, { token: "vercel_blob_rw_synthetic_fixture", access: "private", useCache: false, abortSignal: signal });
   expect(issueSignedToken).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
 });
 it("rejects missing private objects and malformed trusted pathnames without signing", async () => {

@@ -125,7 +125,7 @@ GET /api/listings/[id]/images/[imageId]
   → short-lived signed GET redirect → Vercel Private Blob
 ```
 
-`ImageStorage` is a focused application interface; `VercelBlobImageStorage` contains all provider calls. SDK **@vercel/blob 2.8.2** uses `issueSignedToken` + `presignUrl`, `head`, bounded-prefix private `get`, and `del`. OIDC (`BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN`) is preferred; a server-only static credential is the local fallback. Marketplace mappers still consume stable domain metadata, never storage clients.
+`ImageStorage` is a focused application interface; `VercelBlobImageStorage` contains all provider calls. SDK **@vercel/blob 2.8.2** uses `issueSignedToken` + `presignUrl`, `head`, bounded-prefix private `get`, and `del`. Each operation passes configured credentials explicitly: a complete OIDC pair (`BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN`) is preferred, otherwise a configured server-only `BLOB_READ_WRITE_TOKEN` is used. Missing/malformed configuration fails before SDK access. The adapter and operator cleanup never invoke implicit OIDC/CLI/Keychain discovery or refresh, and a rejected explicit credential does not trigger another credential mode. Configuration is resolved lazily per operation; both finalization requests share the same credential context. `presignUrl` uses the explicitly issued delegation, never a raw server credential. Marketplace mappers still consume stable domain metadata, never storage clients.
 
 The server generates a random image UUID and sanitized `images/{imageId}/{filename}` pathname. A **five-minute** reservation scopes one PUT to that exact path, MIME and declared maximum size, with overwrite and random provider suffixes disabled. The browser receives only a ready signed URL—not signing material or a full credential. Finalization rechecks ownership, expiry, object existence, exact size/type/path and image magic bytes before committing metadata. Repeated finalization is idempotent; ordinary form saves/imports cannot attach Blob paths.
 
@@ -147,7 +147,7 @@ Cleanup records remain until upload capabilities expire plus a one-minute grace 
 
 1. Create/connect a **PRIVATE** Blob store to the Vercel project. Use separate disposable development/preview resources from production and verify environment access.
 2. Run `vercel link`, then `vercel env pull .env.local`. Back up existing local settings first: pulling can replace that file. Keep PostgreSQL and GitHub auth configured too.
-3. Verify server-only `BLOB_STORE_ID` and `VERCEL_OIDC_TOKEN` locally. Vercel supplies deployed OIDC for linked resources. Local OIDC expires; refresh with `vercel env pull .env.local`. Never commit pulled files.
+3. Configure server-only `BLOB_STORE_ID` and `VERCEL_OIDC_TOKEN` explicitly. Local OIDC expires; provisioning a fresh token through an approved development process (for example, `vercel env pull .env.local`) is separate from an image operation. The application does not discover or refresh it. For a bounded experiment, stop on missing/expired credentials rather than repairing them during the run. Never commit pulled files.
 4. If local OIDC is unavailable, put `BLOB_READ_WRITE_TOKEN` only in ignored server-side configuration, never `NEXT_PUBLIC_`, client code, logs or PRs.
 5. Apply migrations, sign in and test a disposable listing's upload/read/reload/delete with the matching private store. This repository provisions no Vercel infrastructure.
 
@@ -155,7 +155,7 @@ References: [SDK/authentication](https://vercel.com/docs/vercel-blob/using-blob-
 
 ### Storage tests
 
-Unit/adapter tests mock the narrow SDK boundary; application/repository tests use deterministic in-memory bytes with real PostgreSQL ownership. Browser tests use a separate loopback capability server; no real Blob account or credentials are required.
+Unit/adapter tests mock the narrow SDK boundary; additional actual-SDK tests use synthetic credentials and an in-memory dispatcher with external connections disabled. The SDK is inlined by the unit-test runner so its transitive discovery helper is intercepted; a deliberately implicit negative control proves that interception works. Application/repository tests use deterministic in-memory bytes with real PostgreSQL ownership. Browser tests use a separate loopback capability server; no real Blob account or credentials are required.
 
 Only an explicit `MARKETPLACE_TEST_BUILD=1` build aliases the adapter to test storage, outputs `.next-test`, and requires a loopback `_test` database with no Vercel environment. Normal builds always resolve the real provider; setting test flags on a normal production artifact does not replace it. The test provider additionally requires a random per-run secret. There are no test upload/read/auth-bypass routes in the production app. Playwright creates genuine database sessions through its test-process-only auth helper. The test server must never be deployed.
 

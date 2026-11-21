@@ -4,31 +4,41 @@ import { ImageOperationError, matchesImageHeader, READ_TTL_MS, PROVIDER_READ_TTL
 import { PrivateImagePreparationError, type PrivateImageReader } from "../../application/ebayPrivateImages";
 import { collectPrivateImage } from "./readPrivateImage";
 
-// Credentials are resolved server-side by the SDK: OIDC + BLOB_STORE_ID preferred.
+// Resolve configured credentials ourselves; the SDK's implicit OIDC path can
+// read CLI credentials or refresh before trying its static-token fallback.
 // This module is only wired through application/server (server-only).
 export class VercelBlobImageStorage implements ImageStorage, PrivateImageReader {
+  private credentials() {
+    const valid = (value: string | undefined): value is string => !!value && value.length <= 16000 && !/[^\x21-\x7e]/.test(value);
+    const { VERCEL_OIDC_TOKEN: oidcToken, BLOB_STORE_ID: storeId, BLOB_READ_WRITE_TOKEN: token } = process.env;
+    const normalizedStore = storeId?.replace(/^store_/, "");
+    if (valid(oidcToken) && storeId && normalizedStore && /^[A-Za-z0-9_-]{1,100}$/.test(normalizedStore)) return { oidcToken, storeId };
+    if (valid(token)) return { token };
+    throw new ImageOperationError("Private image storage is unavailable. Ask the operator to check its configuration.");
+  }
   async readPrivateImage(source: Parameters<PrivateImageReader["readPrivateImage"]>[0], signal: AbortSignal) {
     const trusted = blobImageSourceSchema.parse(source);
     signal.throwIfAborted();
-    const result = await get(trusted.pathname, { access: "private", useCache: false, abortSignal: signal });
+    const result = await get(trusted.pathname, { ...this.credentials(), access: "private", useCache: false, abortSignal: signal });
     if (!result || result.statusCode !== 200) throw new PrivateImagePreparationError("invalid");
     return collectPrivateImage(trusted, { ...result.blob, stream: result.stream }, signal);
   }
   async prepareUpload(upload: ImageUpload) {
     const scope = { pathname: upload.pathname, validUntil: Date.parse(upload.expiresAt),
       allowedContentTypes: [upload.contentType], maximumSizeInBytes: upload.size };
-    const token = await issueSignedToken({ ...scope, operations: ["put"], abortSignal: AbortSignal.timeout(15000) });
+    const token = await issueSignedToken({ ...this.credentials(), ...scope, operations: ["put"], abortSignal: AbortSignal.timeout(15000) });
     const { presignedUrl } = await presignUrl(token, { ...scope, operation: "put", access: "private",
       allowOverwrite: false, addRandomSuffix: false, cacheControlMaxAge: 60 });
     return presignedUrl;
   }
 
   async verifyUpload(upload: ImageUpload) {
-    const metadata = await head(upload.pathname, { abortSignal: AbortSignal.timeout(15000) });
+    const credentials = this.credentials();
+    const metadata = await head(upload.pathname, { ...credentials, abortSignal: AbortSignal.timeout(15000) });
     if (metadata.pathname !== upload.pathname || metadata.size !== upload.size || metadata.contentType !== upload.contentType) {
       throw new ImageOperationError("Uploaded image does not match its declared type or size.");
     }
-    const result = await get(upload.pathname, { access: "private", useCache: false, abortSignal: AbortSignal.timeout(15000) });
+    const result = await get(upload.pathname, { ...credentials, access: "private", useCache: false, abortSignal: AbortSignal.timeout(15000) });
     if (!result || result.statusCode !== 200) throw new ImageOperationError("Uploaded image is unavailable.");
     const reader = result.stream.getReader();
     const header = new Uint8Array(12);
@@ -54,11 +64,11 @@ export class VercelBlobImageStorage implements ImageStorage, PrivateImageReader 
     return this.signRead(pathname, validUntil);
   }
   private async signRead(pathname: string, validUntil: number) {
-    const token = await issueSignedToken({ pathname, operations: ["get"], validUntil, abortSignal: AbortSignal.timeout(15000) });
+    const token = await issueSignedToken({ ...this.credentials(), pathname, operations: ["get"], validUntil, abortSignal: AbortSignal.timeout(15000) });
     return (await presignUrl(token, { pathname, operation: "get", access: "private", validUntil, useCache: false })).presignedUrl;
   }
 
-  async deleteObject(pathname: string) { await del(pathname, { abortSignal: AbortSignal.timeout(15000) }); }
+  async deleteObject(pathname: string) { await del(pathname, { ...this.credentials(), abortSignal: AbortSignal.timeout(15000) }); }
 }
 
 export const imageStorage: ImageStorage & ProviderImageSigner & PrivateImageReader = new VercelBlobImageStorage();
