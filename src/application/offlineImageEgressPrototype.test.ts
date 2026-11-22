@@ -255,3 +255,21 @@ it("does not release an uncooperative simulated resolver at the timeout boundary
     expect(h.ports.connect).not.toHaveBeenCalled();
   } finally { ready.resolve([]); releasePhotoCapacity(other); }
 });
+it("keeps a dispatched mock outcome ambiguous through late acknowledgement without retry", async () => {
+  vi.useFakeTimers(); const h = harness(), ack = deferred<void>(); h.ports.outcome.mockReturnValue(ack.promise);
+  const proof = h.issue(), pending = h.model.verify(proof);
+  await flushUntil(() => h.ports.outcome.mock.calls.length === 1); const other = acquirePhotoCapacity();
+  try {
+    await vi.advanceTimersByTimeAsync(10_000); expect((await pending).reason).toBe("deadline");
+    expect(() => acquirePhotoCapacity()).toThrow(); ack.resolve();
+    await flushUntil(() => { try { const c = acquirePhotoCapacity(); releasePhotoCapacity(c); return true; } catch { return false; } });
+    expect(h.ports.outcome).toHaveBeenCalledOnce(); expect(h.ports.request).toHaveBeenCalledOnce();
+    expect((await h.model.verify(proof)).reason).toBe("proof");
+    expect(h.ports.outcome.mock.calls[0][0]).toMatchObject({ simulation: true, realRequestAllowed: false, associated: false });
+  } finally { ack.resolve(); releasePhotoCapacity(other); }
+});
+it("refuses a stale context after mock acknowledgement without reopening an action", async () => {
+  const h = harness(); h.ports.outcome.mockImplementation(async () => { h.b.session = "replaced"; });
+  const proof = h.issue(); expect((await h.model.verify(proof)).reason).toBe("context");
+  expect(h.ports.outcome).toHaveBeenCalledOnce(); expect((await h.model.verify(proof)).reason).toBe("proof");
+});

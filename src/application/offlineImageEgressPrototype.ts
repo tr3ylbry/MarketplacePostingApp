@@ -184,6 +184,8 @@ export function createOfflineImageEgressPrototype(ports: ModelPorts) {
             const latest = context(await ports.current()); check();
             if (fields.some(k => latest[k] !== p.binding[k])) throw new Refusal("context");
             await ports.outcome(diagnostic); check();
+            const acknowledged = context(await ports.current()); check();
+            if (fields.some(k => acknowledged[k] !== p.binding[k])) throw new Refusal("context");
           }
           return diagnostic;
         } catch (error) { return result(error instanceof Refusal ? error.reason : "unavailable"); }

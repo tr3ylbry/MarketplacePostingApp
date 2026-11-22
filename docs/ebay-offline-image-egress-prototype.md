@@ -26,7 +26,7 @@ Raw targets are held behind opaque internal handles, discarded on handoff/refusa
 
 JavaScript strings, garbage collection, blocked event loops, mock-held references and process dumps prevent a promise of physical or hard-real-time memory erasure. Eligibility checks and logical disposal do not prove secrets have disappeared from RAM. The interface is internal to an offline model; dependency injection is not an authentication or network-security boundary.
 
-Mock intent/outcome calls are **not durable persistence**. A failed intent/outcome never retries or reopens an action. Outcomes are modeled only after successful resource settlement and a final current-context/deadline check. Late timeout/cancellation cannot produce a successful outcome. A fresh instance/process has no durable history: resumability/crash-safe accounting still requires a separately reviewed contract. Do not connect these mocks to existing ledgers or reinterpret an old attempt.
+Mock intent/outcome calls are **not durable persistence**. A failed intent/outcome never retries or reopens an action. Outcomes are dispatched only after successful resource settlement and a current-context/deadline check. Timeout/cancellation before dispatch prevents a modeled-success dispatch; an already-started mock acknowledgement may settle late or ambiguously. The caller stays conservative, rechecks context after acknowledgement and cannot reuse the action. This cannot undo a mock write or promise atomic durable acknowledgement. A fresh instance/process has no durable history: resumability/crash-safe accounting still requires a separately reviewed contract. Do not connect these mocks to existing ledgers or reinterpret an old attempt.
 
 ## Address coverage and the mock connection boundary
 
