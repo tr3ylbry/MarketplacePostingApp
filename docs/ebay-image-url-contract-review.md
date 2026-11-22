@@ -2,6 +2,8 @@
 
 Reviewed offline on November 22, 2026. This is a **decision package, not an approved URL contract, downloader or admission implementation**. Stage 9B remains In Progress. Inventory policy/writes, normal EPS transport and real receipt/association admission are unchanged and disabled.
 
+The separately authorized [offline prototype](ebay-offline-image-egress-prototype.md) now models Option B with invented responses and mock ports only. Its restrictions remain application proposals; no real URL, classifier, resolver, socket, persistence or admission implementation is supplied. The next review is of that prototype, not permission for a live experiment.
+
 ## Recommendation and evidence boundary
 
 Recommend **B: an exact response-returned image URL, held only in bounded operation-local memory for one separately authorized verification**. Its query can remain opaque. An exact approved origin, response provenance and enforceable egress/resource controls can constrain the application's use without knowing parameter names or inventing signature semantics. This is a deliberately limited application policy, not a claim to recognize every valid eBay URL.
