@@ -67,3 +67,5 @@ Coverage includes concurrent claims/content conflicts, consumed-action replay af
 ## Remaining gates and next slice
 
 The persistence and [fake-only grant/review/orchestration integration](ebay-fake-media-workflow.md) are implemented. Separately approved capture-only discovery has supplied structural evidence, not usable receipt admission. The [URL-contract review](ebay-image-url-contract-review.md) separates observed facts from proposed URL/expiry/egress rules; resource/client limits, operational offboarding and further controlled acceptance remain separate gates. Normal transport and admission remain disabled. No real record here establishes ingestion, recovery, remote erasure or publishing eligibility.
+
+The separate [diagnostic verification persistence foundation](ebay-image-verification-persistence.md) adds two owned one-use ledgers under a preparing capture-only parent. It leaves these upload/receipt/association meanings and all admission gates unchanged; diagnostic intent/outcomes never establish ownership or request permission.
