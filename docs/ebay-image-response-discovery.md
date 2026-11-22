@@ -1,6 +1,6 @@
 # Sandbox image-response discovery — capture only
 
-This separately reviewed implementation advances the [real-media design](ebay-real-media-design.md#alternative-capture-only-discovery-proposal). It does not enable normal EPS transport, real receipt/association admission, Inventory writes, offers or publication. **Stage 9B remains In Progress. No real experiment has run.** The existing simulation contracts and normal runtime stay closed.
+This separately reviewed implementation advances the [real-media design](ebay-real-media-design.md#alternative-capture-only-discovery-proposal). It does not enable normal EPS transport, real receipt/association admission, Inventory writes, offers or publication. **Stage 9B remains In Progress.** One separately approved capture-only experiment has completed; its request budget is exhausted, its result remains unknown/unassociated, and no returned URL was fetched. The [offline URL-contract review](ebay-image-url-contract-review.md) distinguishes those structural observations from a proposed operation-local opaque-URL policy. It authorizes no follow-up. The existing simulation contracts and normal runtime stay closed.
 
 ## Manual entry and exact scope
 
@@ -54,8 +54,8 @@ Focused tests use generated fixtures, local Node HTTP servers, synthetic credent
 
 **Do not run the real modes until the owner approves an exact reviewed commit and private execution package.** Apply migration 0011 to development only in that separately authorized setup, along with any still-pending committed prerequisites. This PR applies migrations only in disposable databases.
 
-The published development notice still describes the earlier seller-connection checkpoint and says no eBay photos are sent. Its authentication/testing and media-flow disclosures need separate owner review/publication approval before consent or capture. This work does not modify the public notice or its contact/deletion provisions.
+The capture experiment's separately approved notice publication and media retention/offboarding decisions are recorded privately. They are not reset to proposals by this follow-up review. Future work must recheck the applicable notice and permissions; this document does not modify the public notice or its contact/deletion provisions.
 
-Reports/fences have no TTL or purge/renewal/release service. Owner deletion remains RESTRICT. A proposed private report review at 30 days is a decision obligation, not automatic deletion or an already accepted retention policy. Media offboarding/required erasure needs a lawful minimal safety tombstone or mutation disablement before identifying history is erased; Inventory retention policy is not silently copied here. Local cleanup removes only the disposable listing/photos after retention; keep fences/capture history. **A remote image may remain. Neither returned expiry nor local cleanup proves remote erasure.**
+Reports/fences have no TTL or purge/renewal/release service. Owner deletion remains RESTRICT. Accepted private review/disposition obligations are not automatic deletion, renewal or permission to release a fence. Media offboarding/required erasure needs a lawful minimal safety tombstone or mutation disablement before identifying history is erased; Inventory retention policy is not silently copied here. Local cleanup removes only the disposable listing/photos after retention; keep fences/capture history. **A remote image may remain. Neither returned expiry nor local cleanup proves remote erasure.**
 
 After one separately approved capture, stop for a narrow URL-contract review. Any download or visual-ingestion experiment needs a new reviewed budget and must preserve the discovery fences.
