@@ -1,0 +1,2 @@
+# Preserve exact upstream public XML bytes, including original whitespace.
+docs/data/image-address-policy-v1/*.xml -text -whitespace
