@@ -30,6 +30,8 @@ Mock intent/outcome calls are **not durable persistence**. A failed intent/outco
 
 ## Address coverage and the mock connection boundary
 
+The separately implemented [source-backed numeric policy](ebay-image-public-address-policy.md) is an unwired offline component. It does not replace the synthetic catalog or any mock port below, authorize a destination, or establish real DNS/peer/TLS behavior.
+
 `synthetic-positive-catalog-v1` uses hand-authored test verdicts for exactly `1.1.1.1`, `8.8.8.8` and canonical `2001:4860:4860::8888`. They are numeric fixture values, **not newly resolved/verified destinations**. Its declared source explicitly has no IANA registry snapshot. Every other valid or malformed address is unsupported and blocked. This avoids pretending an improvised short denylist is exhaustive, at the cost of intentionally excluding most public addresses.
 
 Tests include private, loopback, link-local, unspecified, multicast, reserved/special-purpose, documentation, translation and IPv4-mapped IPv6 examples, including mapped positive IPv4 examples. None becomes eligible through mapping/aliasing. Family mismatches, empty/oversized answer sets and mixed positive/unsupported A/AAAA answers fail. All simulated answers are evaluated before selection; one canonical covered address is selected. A future actual classifier needs a separately reviewed source/version, full special-purpose coverage and maintenance policy. This catalog must never be used as a production allowlist.
