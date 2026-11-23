@@ -37,4 +37,4 @@ export async function localImageTls(respond: (socket: tls.TLSSocket, request: Bu
   server.listen(0,"127.0.0.1");await once(server,"listening");const port=(server.address() as net.AddressInfo).port;
   return {port,requests,snis,sockets,async close(){for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
 }
-export const imageWireResponse = (body: Buffer = Buffer.from([137,80,78,71]), headers = "") => Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: ${body.length}\r\nConnection: close\r\n${headers}\r\n`),body]);
+export const imageWireResponse = (body: Buffer = Buffer.from([137,80,78,71]), headers = "", mime: "image/png" | "image/jpeg" = "image/png") => Buffer.concat([Buffer.from(`HTTP/1.1 200 OK\r\nContent-Type: ${mime}\r\nContent-Length: ${body.length}\r\nConnection: close\r\n${headers}\r\n`),body]);

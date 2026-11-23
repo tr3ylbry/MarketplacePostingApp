@@ -1,5 +1,7 @@
 # Safe image downloader: milestone 1
 
+The later [Milestone 3 caller](ebay-image-comparison.md) can fully decode/compare a retrieved fixture before cleanup. This primitive still returns unverified diagnostic bytes, never a visual verdict or association. The original transport limits and settlement contract are unchanged.
+
 This is an implemented, internal Node boundary with synthetic/local wire evidence. The [milestone2 internal diagnostic workflow](ebay-diagnostic-image-workflow.md) now composes it with fresh-response handoff and retained accounting. It remains **unconnected to normal application composition, the existing capture-only workflow/command, the offline model, routes, UI or jobs**. No real image host was resolved or contacted. Actual eBay compatibility, decoded pixels and usable-media admission remain unverified. Normal EPS transport, real receipt/association admission and Inventory writes remain disabled.
 
 ## Interface and claims

@@ -14,6 +14,9 @@ import { observeFreshImage, downloadFreshImage, discardFreshImage, freshImageBin
 import { downloadDeferred } from "./imageDownloadWork";
 import type { ImageDownloadDiagnostic, ImageDownloadOperation } from "./imageDownloader";
 import { IMAGE_DOWNLOAD_POLICY_CUTOFF } from "./imageDownloadPolicy";
+import { ImageComparisonError, type ImageComparisonDiagnostic } from "../../application/imageComparison";
+import { prepareImageReference, startImageComparison, discardImageReference, inconclusiveComparison,
+  type ImageComparisonReference, type ImageComparisonOperation } from "../storage/diagnosticImageComparison";
 
 export interface DiagnosticImageDependencies {
   // Trusted server composition supplies the actual Better Auth API and request
@@ -31,6 +34,8 @@ export interface DiagnosticImageDependencies {
 export interface DiagnosticImageResult {
   state: "unknown" | "not-sent"; associated: false; retrieved: boolean;
   diagnostic: Readonly<ImageDownloadDiagnostic> | null; settlement: "settled" | "unsettled";
+  visual: Readonly<ImageComparisonDiagnostic> | null;
+  acknowledgement: "not-attempted" | "recorded" | "overflow" | "uncertain";
   reason: "completed" | "cancelled" | "deadline" | "busy" | "unavailable";
 }
 export interface DiagnosticImageOperation { result: Promise<Readonly<DiagnosticImageResult>>; settled: Promise<void>; cancel(): void }
@@ -104,11 +109,13 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
       let ref: VerificationReference | undefined, claim: RealMediaClaim | undefined, capacity: PhotoCapacity | undefined;
       let photo: PhotoDerivative | undefined, handle: FreshImageHandle | null = null, download: ImageDownloadOperation | undefined;
       let diagnostic: Readonly<ImageDownloadDiagnostic> | null = null, state: DiagnosticImageResult["state"] = "unknown";
+      let visual: Readonly<ImageComparisonDiagnostic> | null = null, reference: ImageComparisonReference | undefined, comparison: ImageComparisonOperation | undefined;
+      let acknowledgement: DiagnosticImageResult["acknowledgement"] = "not-attempted";
       const wallEnd = Math.min(r.expires, Date.now() + 30_000), monoEnd = Math.min(r.monoUntil, performance.now() + 30_000);
       const summary = (settlement: "settled" | "unsettled"): Readonly<DiagnosticImageResult> => Object.freeze({
-        state, associated: false, retrieved: !reason && diagnostic?.outcome === "retrieved", diagnostic, settlement, reason: reason ?? "completed",
+        state, associated: false, retrieved: diagnostic?.outcome === "retrieved", diagnostic, visual, acknowledgement, settlement, reason: reason ?? "completed",
       });
-      const stop = (why: "cancelled" | "deadline") => { if (finished) return; reason ??= why; controller.abort(); result.resolve(summary("unsettled")); };
+      const stop = (why: "cancelled" | "deadline") => { if (finished) return; reason ??= why; controller.abort(); if(comparison)visual=inconclusiveComparison(why,"unsettled"); result.resolve(summary("unsettled")); };
       const abort = () => stop("cancelled"); callerSignal?.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => stop("deadline"), Math.max(1, Math.min(wallEnd - Date.now(), monoEnd - performance.now())));
       const signal = controller.signal;
@@ -120,11 +127,14 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             const status = await deps.verification.status(ref.ownerId, ref.id);
-            if (!status) { reason ??= "unavailable"; return; }
-            await deps.verification.recordOutcome(ref, { intentRevision: status.phase === "intent-recorded" ? 1 : null, envelope: value }); return;
+            if (!status) { reason ??= "unavailable"; acknowledgement="uncertain"; return; }
+            const ack=await deps.verification.recordOutcome(ref, { intentRevision: status.phase === "intent-recorded" ? 1 : null, envelope: value });
+            if(acknowledgement!=="uncertain")acknowledgement=ack.overflow||!ack.evidenceId?"overflow":acknowledgement==="overflow"?"overflow":"recorded";
+            return;
           } catch { /* Same bounded local acknowledgement only; no I/O retry. */ }
         }
         reason ??= "unavailable";
+        acknowledgement="uncertain";
       }
       async function captureEvidence(value: CaptureReport) {
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -145,6 +155,9 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
           if (!Buffer.isBuffer(photo.bytes) || photo.sourceDigest !== r.sourceDigest || photo.recipe !== r.recipe || photo.contentType !== "image/png" ||
             photo.width !== 500 || photo.height !== 600 || photo.size > CAPTURE_IMAGE_BYTES || photo.size !== photo.bytes.length ||
             realMediaDigest(photo.bytes) !== photo.derivativeDigest) throw new RealMediaError("stale");
+          reference=await prepareImageReference(photo.bytes,{operationId:r.operationId,derivativeDigest:photo.derivativeDigest},
+            {wallUntil:wallEnd,monoUntil:monoEnd},signal,capacity);
+          await current(r,signal,wallEnd,monoEnd);
           ref = await deps.verification.reserveVerification({ parent: claim, guard, actionHash: realMediaDigest("verification:" + r.actionHash),
             sourceDigest: photo.sourceDigest, derivativeDigest: photo.derivativeDigest, reviewUntil: new Date(r.expires).toISOString(), policy: IMAGE_VERIFICATION_POLICY });
           check(r, signal, wallEnd, monoEnd);
@@ -186,6 +199,28 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
           const downloaded = await download.result;
           diagnostic = downloaded.diagnostic;
           try {
+            // A child borrow ends only at actual transport settlement. Keep the
+            // private data until then, and reuse the same parent slot for native
+            // comparison. No request window is renewed for decoding.
+            await download.settled;
+            if(diagnostic.outcome==="retrieved"&&downloaded.data){
+              try{
+                await current(r,signal,wallEnd,monoEnd);
+                const deadlines=await deps.verification.window(ref!,guard,"intent-recorded");
+                check(r,signal,wallEnd,monoEnd);
+                comparison=startImageComparison(reference,{operationId:r.operationId,derivativeDigest:photo.derivativeDigest},downloaded.data,diagnostic.mime!,
+                  {wallUntil:Math.min(wallEnd,...Object.values(deadlines)),monoUntil:monoEnd},signal,capacity);
+                visual=await comparison.result;await comparison.settled;
+                // Discard even a late local match if ownership/session/context
+                // or any original request deadline changed during native work.
+                await current(r,signal,wallEnd,monoEnd);
+                await deps.verification.checkIntentContext(ref!,guard);
+                check(r,signal,wallEnd,monoEnd);
+              }catch(error){
+                const why=signal.aborted?(reason==="deadline"?"deadline":"cancelled"):error instanceof ImageComparisonError?error.reason:"context";
+                visual=inconclusiveComparison(why);
+              }
+            }
             if (reason && diagnostic.reason !== reason) await record(envelope(reason === "cancelled" ? "cancelled" : reason === "deadline" ? "deadline" : "unavailable", "unsettled", reason === "cancelled" ? "cancelled" : "failure"));
             await record(diagnosticEnvelope(diagnostic));
           } finally { downloaded.data?.fill(0); }
@@ -201,6 +236,8 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
         } finally {
           discardFreshImage(handle);
           if (download) { download.cancel(); await download.settled; }
+          if(comparison){comparison.cancel();await comparison.settled;}
+          discardImageReference(reference);
           if (ref && reason) await record(envelope("settled", "settled", "settlement"));
           if (Buffer.isBuffer(photo?.bytes)) photo.bytes.fill(0);
           if (capacity) releasePhotoCapacity(capacity);

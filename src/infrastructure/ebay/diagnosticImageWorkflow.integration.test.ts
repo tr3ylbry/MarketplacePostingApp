@@ -1,11 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import tls from "node:tls";
+import sharp from "sharp";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { diagnosticImageWire, SYNTHETIC_PRIMARY } from "../../test/diagnosticImageWire";
+import { imageWireResponse } from "../../test/imageDownloaderFixtures";
+import * as nativeComparison from "../storage/diagnosticImageDecode";
 import { disposableVerificationDatabase } from "../../test/disposableVerificationDatabase";
 import { authOptions } from "../../auth/options";
 import { listingFixture } from "../../test/fixtures";
@@ -16,7 +19,7 @@ import { acquirePhotoCapacity, releasePhotoCapacity } from "../../application/ph
 import { EBAY_DISCOVERY_SCOPES } from "../../application/ebayConnection";
 import { realMediaDigest, type RealMediaClaim, type RealMediaReviewGuard } from "../../application/ebayRealMedia";
 import type { VerificationReference, VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
-import { generateCaptureFixture } from "../storage/captureFixture";
+import { generateVerificationFixture as generateCaptureFixture } from "../storage/verificationFixture";
 import { photoTransformer, PHOTO_RECIPE } from "../storage/photoDerivative/transformPhoto";
 import { DrizzleEbayImageVerificationRepository } from "../repositories/drizzleEbayImageVerificationRepository";
 import { DrizzleEbayRealMediaRepository } from "../repositories/drizzleEbayRealMediaRepository";
@@ -132,7 +135,7 @@ it("migrates repeatably and completes authenticated native POST→intent→GET w
   const [parent] = await parents(), [row] = await reservations(); expect(parent.postIntentAt).not.toBeNull(); expect(row).toMatchObject({ phase: "intent-recorded", parentPreparingRevision: 0 });
   expect(await events()).toHaveLength(2); expect((await events()).find(e => e.envelope.event === "response")?.envelope).toMatchObject({ event: "response", httpStatus: 200 });
   expect(JSON.stringify(await events())).not.toMatch(/opaque|image%41|CAPABILITY|synthetic-only|pathname|ciphertext/);
-  expect(JSON.stringify(result)).not.toMatch(/opaque|image%41|seller|token|session|recipe/); await noAdmission();
+  expect(JSON.stringify(result)).not.toMatch(/opaque|image%41|seller|token|session|sourceDigest|derivativeDigest|pathname/); await noAdmission();
   const one = acquirePhotoCapacity(), two = acquirePhotoCapacity(); expect(() => acquirePhotoCapacity()).toThrow(); releasePhotoCapacity(one); releasePhotoCapacity(two);
 });
 it.each(["cookie", "tampered", "expired", "revoked", "foreign-session", "review-copy", "wrong-seller", "wrong-source"])("rejects %s authentication/review context without sending", async kind => {
@@ -176,7 +179,7 @@ it.each(["capture", "outcome"])("retries only an identical local %s acknowledgem
 });
 it("does not claim acknowledged success after all outcome acknowledgements are lost", async () => {
   const original = verification.recordOutcome.bind(verification); vi.spyOn(verification, "recordOutcome").mockImplementation(async (...args) => { await original(...args); throw Error("lost"); });
-  const result = await complete(); expect(result).toMatchObject({ retrieved: false, associated: false, reason: "unavailable" });
+  const result = await complete(); expect(result).toMatchObject({ retrieved: true, acknowledgement: "uncertain", associated: false, reason: "unavailable" });
   expect(wire.posts).toHaveLength(1); expect(wire.image.requests).toHaveLength(1); expect((await events()).length).toBeGreaterThan(0);
 });
 it.each(["review-replay", "restart", "changed-source-id"])("never resumes a fenced operation after %s", async kind => {
@@ -365,3 +368,50 @@ it.each(["session", "refresh", "lease", "review", "policy", "access"])("refuses 
     await noAdmission();
   } finally { if (kind === "policy") await db.execute(sql.raw(policy)); }
 }, 45_000);
+
+it.each(["png","jpeg","different-marker","corrupt","mirror","crop"])("composes full guarded retrieval→decode→comparison for %s without admission",async kind=>{
+ const before=Buffer.from(source.bytes),original=wire.response.before;let returned:Buffer|undefined,mime:"image/png"|"image/jpeg"="image/png";
+ wire.response.before=async(req,body)=>{
+  await original(req,body);const boundary=/boundary=(.+)$/.exec(req.headers["content-type"]!)![1];
+  const exact=body.subarray(body.indexOf("\r\n\r\n")+4,-Buffer.byteLength(`\r\n--${boundary}--\r\n`));
+  if(kind==="jpeg"){returned=await sharp(exact).jpeg({quality:85,chromaSubsampling:"4:2:0",progressive:true}).toBuffer();mime="image/jpeg";}
+  else if(kind==="different-marker")returned=(await generateCaptureFixture()).bytes;
+  else if(kind==="corrupt")returned=Buffer.from([137,80,78,71]);
+  else if(kind==="mirror")returned=await sharp(exact).flop().png().toBuffer();
+  else if(kind==="crop")returned=await sharp(exact).extract({left:10,top:10,width:480,height:580}).resize(500,600).png().toBuffer();
+  else returned=await sharp(exact).png({compressionLevel:9,progressive:true}).toBuffer();
+ };
+ wire.response.image=socket=>{expect(returned).toBeDefined();socket.end(imageWireResponse(returned!,"",mime));};
+ const decode=nativeComparison.decodeDiagnosticImage;
+ const spy=vi.spyOn(nativeComparison,"decodeDiagnosticImage").mockImplementation((...args)=>{expect(transactions.getStore()).not.toBe(true);return decode(...args);});
+ try{
+  const result=await complete();expect(result).toMatchObject({retrieved:true,acknowledgement:"recorded",associated:false,state:"unknown",reason:"completed"});
+  expect(result.visual?.verdict).toBe(["png","jpeg"].includes(kind)?"match":kind==="corrupt"?"inconclusive":"mismatch");
+  if(kind==="png"||kind==="jpeg")expect(result.visual).toMatchObject({decoding:"passed",geometry:"passed",marker:"passed",color:"passed",similarity:"passed",associated:false});
+  expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect(source.bytes).toEqual(before);
+  expect((await parents())[0].postIntentAt).not.toBeNull();expect(await events()).toHaveLength(2);
+  expect(JSON.stringify(await events())).not.toMatch(/marker|metrics|recipe|opaque|digest|image%41/);await noAdmission();
+ }finally{spy.mockRestore();returned?.fill(0);}
+});
+
+it.each(["cancelled","context","expiry","lost-ack"])("retains fences and facts on %s during/after native comparison",async kind=>{
+ const original=wire.response.before;let returned:Buffer|undefined;
+ wire.response.before=async(req,body)=>{await original(req,body);const boundary=/boundary=(.+)$/.exec(req.headers["content-type"]!)![1];returned=Buffer.from(body.subarray(body.indexOf("\r\n\r\n")+4,-Buffer.byteLength(`\r\n--${boundary}--\r\n`)));};
+ wire.response.image=socket=>socket.end(imageWireResponse(returned!));
+ let entered=false,resolve!:(v:Buffer)=>void;const pending=new Promise<Buffer>(r=>{resolve=r;}),decode=nativeComparison.decodeDiagnosticImage;let calls=0;
+ const spy=vi.spyOn(nativeComparison,"decodeDiagnosticImage").mockImplementation(async(...args)=>{if(++calls===2){entered=true;return pending;}return decode(...args);});
+ if(kind==="lost-ack"){const ack=verification.recordOutcome.bind(verification);vi.spyOn(verification,"recordOutcome").mockImplementation(async(...args)=>{await ack(...args);throw Error("lost");});}
+ const op=await begin();let settled=false;void op.settled.then(()=>{settled=true;});
+ try{
+  for(let n=0;n<300&&!entered;n++)await new Promise(r=>setTimeout(r,5));expect(entered).toBe(true);
+  if(kind==="cancelled"){op.cancel();const early=await op.result;expect(early.reason).toBe("cancelled");expect(early.visual?.verdict).toBe("inconclusive");expect(settled).toBe(false);}
+  if(kind==="context")await connections.disconnect(owner);
+  if(kind==="expiry")await db.update(schema.sessions).set({expiresAt:new Date(Date.now()-1)}).where(eq(schema.sessions.id,sessionId));
+  const pixels=await sharp(returned!).raw().toBuffer();resolve(pixels);
+  const result=await op.result;await op.settled;
+  if(kind==="lost-ack")expect(result).toMatchObject({retrieved:true,acknowledgement:"uncertain",visual:{verdict:"match"},associated:false});
+  else expect(result.visual?.verdict).toBe("inconclusive");
+  expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect((await parents())[0].postIntentAt).not.toBeNull();
+  expect((await reservations())[0].requestIntentAt).not.toBeNull();await noAdmission();
+ }finally{resolve(Buffer.alloc(900_000));await op.settled;spy.mockRestore();returned?.fill(0);}
+});

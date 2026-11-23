@@ -1,5 +1,7 @@
 # Internal local photo derivatives
 
+The unwired [diagnostic workflow and Milestone 3 comparison](ebay-image-comparison.md) reuse the exact accepted derivative buffer. Local export validation and untrusted returned-image decoding are separate boundaries with different container/metadata policies; an export digest is not a returned-content identity. No normal app/manual provider wiring or real operation is enabled.
+
 The [accepted local privacy defaults](photo-export-privacy.md) are implemented behind `deriveOwnedPhoto` in `src/application/photoDerivativeServer.ts`. This is a **server-only internal function**, not a route, server action, download or browser export. The [internal fake-only workflow](ebay-fake-media-workflow.md) now consumes the same derivative service through isolated test composition. Existing **Validate photo N**, browser reads, Reverb, bundles and media simulation are unchanged. Real EPS transport remains hard-disabled; there is no new schema, credential, real OAuth grant or environment switch.
 
 ## Authorized operation
