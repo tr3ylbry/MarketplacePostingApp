@@ -97,6 +97,16 @@ it("the session reader constructs only a read-only pool without validating a ses
   } finally { await reader.close(); }
 });
 
+it.each(["session","execution"] as const)("uses fixed diagnostic timeouts without changing the legacy %s profile",async kind=>{
+  const env=environment(base+"?options=-c%20statement_timeout%3D0"),pool=openLocalDatabasePool(env,kind,true);
+  try{
+    const options=mocks.pools[0],parsed=parse(String(options.connectionString));
+    expect(parsed.options).toBe(`${kind==="session"?"-c default_transaction_read_only=on ":""}-c statement_timeout=5000 -c lock_timeout=5000`);
+    expect(options).toMatchObject({connectionTimeoutMillis:5000,query_timeout:5000});
+    expect(env.DATABASE_URL).toContain("statement_timeout%3D0");
+  }finally{await pool.end();}
+});
+
 it.each(["HOST=remote.invalid", "ho%00st=remote.invalid", "ho+st=remote.invalid", "options=&%6fptions=duplicate"])("rejects unknown/ambiguous decoded names deliberately: %s", query => {
     expect(() => openLocalDatabasePool(environment(base + "?" + query), "execution")).toThrow("Local session unavailable.");
     expect(mocks.pools).toHaveLength(0);

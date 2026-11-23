@@ -31,32 +31,40 @@ export function localDatabase(env: NodeJS.ProcessEnv): URL {
 }
 
 // Every manual pool uses the same validation before Pool can parse or connect.
-export function openLocalDatabasePool(env: NodeJS.ProcessEnv, kind: "session" | "execution") {
+export function openLocalDatabasePool(env: NodeJS.ProcessEnv, kind: "session" | "execution", bounded = false) {
   const url = localDatabase(env);
   if (kind === "session") url.searchParams.set("options", "-c default_transaction_read_only=on");
+  if (bounded) url.searchParams.set("options", `${kind === "session" ? "-c default_transaction_read_only=on " : ""}-c statement_timeout=5000 -c lock_timeout=5000`);
   return new Pool({ connectionString: url.toString(), max: kind === "session" ? 1 : 5,
-    ...(kind === "session" ? { connectionTimeoutMillis: 5000 } : {}) });
+    ...(kind === "session" || bounded ? { connectionTimeoutMillis: 5000 } : {}), ...(bounded ? { query_timeout: 5000 } : {}) });
 }
 
 // Separate, strictly read-only connection used by ALL manual session reads.
 // This changes no normal application auth setting or cookie security attribute.
-export function openLocalSessionReader(env: NodeJS.ProcessEnv) {
-  const pool = openLocalDatabasePool(env, "session");
+export function openLocalSessionReader(env: NodeJS.ProcessEnv, bounded = false) {
+  const pool = openLocalDatabasePool(env, "session", bounded);
   let unavailable = false;
   let closing: Promise<void> | undefined;
   pool.on("error", () => { unavailable = true; });
   try {
     const options = authOptions(drizzle(pool, { schema }), env);
     const auth = betterAuth({ ...options, session: { ...options.session, deferSessionRefresh: true } });
+    async function headers(cookie: string) {
+      const validated = localSessionCookie(cookie);
+      if (unavailable || (await pool.query("SHOW transaction_read_only")).rows[0]?.transaction_read_only !== "on") throw new LocalSessionError("unavailable");
+      return new Headers({ cookie: validated });
+    }
     return {
+      // Internal manual composition only. The workflow still calls the genuine
+      // signed-session API with supported read-only GET options, never a DTO.
+      api: { getSession: auth.api.getSession }, headers,
       async session(cookie: string) {
-        const headers = new Headers({ cookie: localSessionCookie(cookie) });
+        const validated = localSessionCookie(cookie);
         try {
-          if (unavailable) throw Error();
-          if ((await pool.query("SHOW transaction_read_only")).rows[0]?.transaction_read_only !== "on") throw Error();
+          const requestHeaders = await headers(validated);
           // disableRefresh alone still deletes expired rows. Supported GET +
           // deferSessionRefresh avoids that deletion; DB read-only is a backstop.
-          const result = await auth.api.getSession({ method: "GET", headers,
+          const result = await auth.api.getSession({ method: "GET", headers: requestHeaders,
             query: { disableRefresh: true, disableCookieCache: true }, returnHeaders: true });
           const s = result.response;
           // Expired/revoked reads can internally clear cookies. Nothing is ever
