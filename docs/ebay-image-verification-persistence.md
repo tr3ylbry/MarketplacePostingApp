@@ -1,5 +1,7 @@
 # Diagnostic image-verification persistence
 
+The [Milestone 3 comparison](ebay-image-comparison.md) adds transient full-decode/visual outcomes in the internal caller. It changes neither these ledgers/envelopes nor their admission rules. Visual scores, returned hashes and bytes are not persisted; any future durable visual-evidence contract needs separate review.
+
 This internal foundation records one-use diagnostic accounting. The repository has **no runtime entry point, network client, model wiring or response-proof issuer**. The [milestone2 internal workflow](ebay-diagnostic-image-workflow.md) now composes it with authenticated context, native fresh-response handoff and the bounded downloader, while remaining disconnected from normal application/manual entry points. A reservation, committed intent, successful context check or HTTP-shaped outcome is not permission to request an image, provider provenance, remote ownership, decoded-image acceptance or a usable association.
 
 Normal EPS transport, real receipt/association admission and Inventory writes remain disabled. The prior capture remains unknown/unassociated with its original fences, report, review deadlines and exhausted request budget. Missing historical URLs cannot be reconstructed or used by this foundation.

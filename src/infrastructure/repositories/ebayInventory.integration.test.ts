@@ -20,7 +20,11 @@ const resource = async (id: string) => (await db.select().from(r).where(eq(r.id,
 const evidence = async (id: string) => db.select().from(e).where(eq(e.attemptId, id));
 const intent = () => ({ payloadDigest: inventoryDigest("item"), mediaManifestDigest: inventoryDigest("photos") });
 async function envelope(overrides: Partial<InventoryEvidence> = {}): Promise<InventoryEvidence> {
-  const result=await db.execute(sql`SELECT clock_timestamp() AS at`), at=new Date(result.rows[0].at as string).toISOString();
+  // Wait past the actual persisted claim boundary: timestamp(3) can round a
+  // claim slightly into the future. Preserve genuine observation microseconds
+  // too; JS Date truncation can otherwise backdate this legitimate control.
+  await db.execute(sql`SELECT pg_sleep_until(max(created_at)) FROM public.ebay_inventory_attempts WHERE owner_id=${owner}`);
+  const result=await db.execute(sql`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at`), at=String(result.rows[0].at);
   return { version: "inventory-local-v1", kind: "inspection", startedAt: at, finishedAt: at,
     item: "absent", coverage: "complete", outcome: "observed", code: "none", contentDigest: null, related: [], httpStatus: 200, overflow: false, ...overrides };
 }
@@ -151,7 +155,7 @@ it("preserves late evidence on the old attempt without activating/revising its r
   expect(await repository.projection(owner,listingId)).toMatchObject({ attemptId:replacement.id,hold:"resource" });
 });
 it.each(["collision","stale","overflow"] as const)("persists a resource hold for pre-intent %s", async code => {
-  const c = await claim(); await repository.acknowledge(c,await envelope({ code })); expect((await resource(c.resourceId)).hold).toBe("resource");
+  const c = await claim(); const ack=await repository.acknowledge(c,await envelope({ code })); expect(ack.late).toBe(false); expect((await resource(c.resourceId)).hold).toBe("resource");
   const next = await claim({ operation:"inspect" }); expect(next.id).not.toBe(c.id);
   await repository.acknowledge(next,await envelope()); expect((await resource(c.resourceId)).hold).toBe("resource");
   await expect(claim({ operation:"initial-stage" })).rejects.toMatchObject({ code:"blocked" });
