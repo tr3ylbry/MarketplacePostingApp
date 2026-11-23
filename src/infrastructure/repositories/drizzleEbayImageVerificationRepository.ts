@@ -103,6 +103,53 @@ export class DrizzleEbayImageVerificationRepository {
       });
     });
   }
+  /** Internal deadline snapshot, never authentication or permission. SQL floors
+   * microseconds rather than rounding eligibility up to a JS millisecond. All
+   * blocking reads precede the authoritative database wall-time check. */
+  async window(input: VerificationReference, guard: RealMediaReviewGuard, expectedPhase: "prepared" | "intent-recorded"): Promise<{
+    session: number; review: number; context: number; lease: number; access: number; refresh: number; request: number;
+  }> {
+    return this.protect(async () => {
+      const ref = verificationReferenceSchema.parse(input);
+      return this.db.transaction(async tx => {
+        const parent = await this.lockContext(tx, ref.parent, guard);
+        const row = await this.lockRetained(tx, ref);
+        if (row.revision !== ref.revision || !["prepared", "intent-recorded"].includes(expectedPhase) || row.phase !== expectedPhase ||
+          !parent.postIntentAt || parent.revision !== row.parentPreparingRevision + 1 ||
+          parent.sourceDigest !== row.expectedSourceDigest || parent.derivativeDigest !== row.expectedDerivativeDigest) refuse();
+        const result = await tx.execute(sql`SELECT
+          floor(extract(epoch FROM s.expires_at)*1000)::text AS session,
+          floor(extract(epoch FROM v.review_until)*1000)::text AS review,
+          floor(extract(epoch FROM coalesce(v.use_until,v.lease_until))*1000)::text AS context,
+          floor(extract(epoch FROM least(v.lease_until,a.lease_until))*1000)::text AS lease,
+          floor(extract(epoch FROM c.access_expires_at)*1000)::text AS access,
+          floor(extract(epoch FROM c.refresh_expires_at)*1000)::text AS refresh,
+          floor(extract(epoch FROM coalesce(v.request_deadline,v.lease_until))*1000)::text AS request
+          FROM public.ebay_image_verifications v
+          JOIN public.ebay_real_media_attempts a ON a.id=v.upload_attempt_id AND a.owner_id=v.owner_id
+          JOIN public.ebay_connections c ON c.owner_id=v.owner_id
+          JOIN public.sessions s ON s.id=${guard.sessionId} AND s.user_id=v.owner_id
+          WHERE v.id=${row.id} AND v.owner_id=${row.ownerId}`);
+        const raw = result.rows[0]; if (!raw) refuse();
+        const values = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, Number(value)]));
+        const times = z.strictObject({ session:z.number().int().safe(),review:z.number().int().safe(),context:z.number().int().safe(),
+          lease:z.number().int().safe(),access:z.number().int().safe(),refresh:z.number().int().safe(),request:z.number().int().safe() }).parse(values);
+        if (row.phase === "intent-recorded") {
+          await tx.execute(sql`SELECT public.image_verification_intent_time(${row.id},${row.ownerId},${realMediaDigest(ref.parent.token)},${ref.parent.revision},${ref.revision})`);
+        } else {
+          const checked = await tx.execute(sql`WITH auth_clock AS MATERIALIZED (
+            SELECT public.capture_media_authorize(${ref.parent.id},${ref.ownerId},${realMediaDigest(ref.parent.token)},${ref.parent.revision}) AS at
+          ) SELECT 1 FROM public.ebay_image_verifications v, auth_clock t
+            WHERE v.id=${row.id} AND v.owner_id=${row.ownerId} AND v.phase='prepared'
+            AND v.lease_until>t.at AND v.review_until>t.at AND NOT v.evidence_overflow
+            AND NOT EXISTS(SELECT 1 FROM public.ebay_image_verification_outcomes e WHERE e.verification_id=v.id)
+            AND public.image_verification_profile_valid(v.contract_version,v.address_policy_version,v.address_policy_data_hash,t.at)`);
+          if (checked.rows.length !== 1) refuse();
+        }
+        return times;
+      });
+    });
+  }
   async closePrepared(input: VerificationReference, reason: VerificationCloseReason): Promise<void> {
     return this.protect(async () => {
       const ref = verificationReferenceSchema.parse(input), code = verificationCloseReason.parse(reason);

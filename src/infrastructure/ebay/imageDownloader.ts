@@ -1,5 +1,5 @@
 import { PhotoDerivativeError } from "../../application/photoDerivative";
-import { acquirePhotoCapacity, borrowPhotoCapacity, releasePhotoCapacity } from "../../application/photoCapacity";
+import { acquirePhotoCapacity, borrowPhotoCapacity, releasePhotoCapacity, type PhotoCapacity } from "../../application/photoCapacity";
 import { IMAGE_ADDRESS_POLICY } from "./imagePublicAddressPolicy";
 import { inspectImageAddressSet } from "./imageAddressSetPolicy";
 import { resolveImageDownloadAddresses } from "./imageDownloadDns";
@@ -47,7 +47,7 @@ function downloadClock() {
   } catch { throw new ImageDownloadRefusal("clock"); }
 }
 /** Unwired Node boundary. At most one DNS exchange, TLS connection and GET. */
-export function startImageDownload(input: ImageDownloadInput, signal?: AbortSignal): ImageDownloadOperation {
+export function startImageDownload(input: ImageDownloadInput, signal?: AbortSignal, parentCapacity?: PhotoCapacity): ImageDownloadOperation {
   const result = downloadDeferred<ImageDownloadResult>(), settled = downloadDeferred<void>();
   let reason: DownloadReason | null = null, finished = false, allSettled = false;
   const resources: Array<ImageDownloadWork<unknown>> = [], waits: Promise<unknown>[] = [];
@@ -77,7 +77,7 @@ export function startImageDownload(input: ImageDownloadInput, signal?: AbortSign
         if (wall >= value.until || elapsed >= monoUntil || wall >= IMAGE_DOWNLOAD_POLICY_CUTOFF) throw new ImageDownloadRefusal("deadline");
       };
       if (signal?.aborted || controller.signal.aborted) throw new ImageDownloadRefusal("cancelled");
-      capacity = acquirePhotoCapacity(); finishCapacity = borrowPhotoCapacity(capacity);
+      capacity = parentCapacity ?? acquirePhotoCapacity(); finishCapacity = borrowPhotoCapacity(capacity);
       const abort = () => stop("cancelled"); signal?.addEventListener("abort", abort, { once: true });
       removeAbort = () => signal?.removeEventListener("abort", abort);
       timer = setTimeout(() => stop("deadline"), Math.max(1, Math.floor(value.until - initialWall)));
@@ -93,7 +93,7 @@ export function startImageDownload(input: ImageDownloadInput, signal?: AbortSign
       check(); const peer = track(connectImagePeer(candidate)), socket = await peer.ready; check();
       const http = track(prepareImageHttp(socket, candidate, value.target, check)); progress = http.progress;
       await http.attached; check();
-      const context = Promise.resolve().then(value.beforeRequest);
+      const context = Promise.resolve().then(() => { check(); return value.beforeRequest(); });
       // A timed-out/uncancellable callback remains started work. Its settlement
       // is tracked even after the bounded result has returned to the caller.
       waits.push(context.catch(() => {}));
@@ -110,7 +110,7 @@ export function startImageDownload(input: ImageDownloadInput, signal?: AbortSign
       if (!finished) for (const resource of resources) { try { resource.abort(); } catch { /* wait below */ } }
       body?.data.fill(0);
       if (timer) clearTimeout(timer); removeAbort();
-      if (capacity) releasePhotoCapacity(capacity);
+      if (capacity && !parentCapacity) releasePhotoCapacity(capacity);
       await Promise.allSettled(waits);
       finishCapacity?.(); resources.length = 0; waits.length = 0; progress = undefined; allSettled = true; finished = true; settled.resolve();
     }

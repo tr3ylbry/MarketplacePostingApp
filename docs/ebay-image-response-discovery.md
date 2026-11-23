@@ -1,5 +1,7 @@
 # Sandbox image-response discovery — capture only
 
+The separate [milestone2 diagnostic workflow](ebay-diagnostic-image-workflow.md) now composes native response handoff, retained accounting and one bounded GET internally. It does **not** wire or change the capture-only manual command described below. The legacy injectable capture seam still returns structural reports only and cannot mint its private handles. No new real execution is authorized.
+
 This separately reviewed implementation advances the [real-media design](ebay-real-media-design.md#alternative-capture-only-discovery-proposal). It does not enable normal EPS transport, real receipt/association admission, Inventory writes, offers or publication. **Stage 9B remains In Progress.** One separately approved capture-only experiment has completed; its request budget is exhausted, its result remains unknown/unassociated, and no returned URL was fetched. The [offline URL-contract review](ebay-image-url-contract-review.md) distinguishes those structural observations from a proposed operation-local opaque-URL policy. It authorizes no follow-up. The existing simulation contracts and normal runtime stay closed.
 
 ## Manual entry and exact scope
