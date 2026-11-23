@@ -1,5 +1,7 @@
 # Real media persistence foundation — transport disabled
 
+The [milestone2 diagnostic composition](ebay-diagnostic-image-workflow.md) now reuses this retained capture-only parent and its permanent fences together with the separate diagnostic ledgers. It does not broaden receipt/association admission, wire application/manual entry points or enable normal transport/Inventory writes. No new migration or retention policy is added.
+
 **November 22 offline review:** the separately approved capture-only experiment retained structural evidence and both content fences, never a usable receipt/association or complete returned URL. The [URL-contract review](ebay-image-url-contract-review.md) proposes an operation-local opaque-URL policy for later review. Current plaintext receipt columns and synthetic-only admission/SQL constraints remain unchanged; encrypted capability persistence would require its own design. Accepted private report/offboarding obligations do not authorize automatic history expiry or fence release.
 
 **November 20 follow-up:** the separately authorized [capture-only discovery implementation](ebay-image-response-discovery.md) adds a manual pinned client, structural evidence channel and explicit discovery OAuth-profile preparation. It does not enable normal transport, real receipt/association admission or any real experiment. Earlier proposal/unimplemented wording below records its original checkpoint; later accepted privacy/persistence decisions remain effective.

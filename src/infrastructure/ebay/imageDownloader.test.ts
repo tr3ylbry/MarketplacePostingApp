@@ -3,7 +3,7 @@ import { assertOfflineGuards } from "../../test/offlinePrototypeGuards";
 import { startImageDownload, type ImageDownloadInput } from "./imageDownloader";
 import { resolveImageDownloadAddresses } from "./imageDownloadDns";
 import { connectImagePeer, prepareImageHttp } from "./imageDownloadTransport";
-import { acquirePhotoCapacity,releasePhotoCapacity } from "../../application/photoCapacity";
+import { acquirePhotoCapacity,borrowPhotoCapacity,releasePhotoCapacity } from "../../application/photoCapacity";
 vi.mock("./imageDownloadDns",()=>({resolveImageDownloadAddresses:vi.fn()}));
 vi.mock("./imageDownloadTransport",()=>({connectImagePeer:vi.fn(),prepareImageHttp:vi.fn()}));
 function deferred<T>(){let resolve!:(x:T)=>void,reject!:(x:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});void promise.catch(()=>{});return {promise,resolve,reject};}
@@ -45,3 +45,15 @@ it.each([NaN,Infinity,now+0.5])("refuses invalid context clock %#",async t=>{con
 it("rejects backwards monotonic time without a connection",async()=>{const o=start();const clock=vi.spyOn(performance,"now").mockReturnValue(-1);dns.resolve([{address:"1.1.1.1",family:4}]);done.resolve();try{expect((await o.result).diagnostic.reason).toBe("clock");await o.settled;expect(connectImagePeer).not.toHaveBeenCalled();}finally{clock.mockRestore();}});
 it("discards a throwing clock as a fixed failure",async()=>{const clock=vi.spyOn(performance,"now").mockImplementationOnce(()=>{throw Error("PRIVATE-MARKER");});const o=start();try{expect((await o.result).diagnostic.reason).toBe("clock");await o.settled;expect(resolveImageDownloadAddresses).not.toHaveBeenCalled();}finally{clock.mockRestore();}});
 it("refuses a forward wall-clock expiry even when the monotonic timer has not fired",async()=>{const o=start();vi.setSystemTime(now+20_000);dns.resolve([{address:"1.1.1.1",family:4}]);done.resolve();expect((await o.result).diagnostic.reason).toBe("deadline");await o.settled;expect(connectImagePeer).not.toHaveBeenCalled();});
+it("borrows one parent slot without acquiring a second and never closes its owner",async()=>{
+  const parent=acquirePhotoCapacity(),o=startImageDownload(input(),undefined,parent);operations.push(o);
+  const second=acquirePhotoCapacity();expect(()=>acquirePhotoCapacity()).toThrow();
+  o.cancel();dns.resolve([]);done.resolve();await o.settled;
+  expect(()=>acquirePhotoCapacity()).toThrow();releasePhotoCapacity(parent);const after=acquirePhotoCapacity();releasePhotoCapacity(after);releasePhotoCapacity(second);
+});
+it("refuses overlapping or forged borrowing without touching the parent lease",async()=>{
+  const parent=acquirePhotoCapacity(),finish=borrowPhotoCapacity(parent);
+  const a=startImageDownload(input(),undefined,parent),b=startImageDownload(input(),undefined,{});operations.push(a,b);
+  expect((await a.result).diagnostic.reason).toBe("busy");expect((await b.result).diagnostic.reason).toBe("busy");await Promise.all([a.settled,b.settled]);
+  expect(resolveImageDownloadAddresses).not.toHaveBeenCalled();finish();releasePhotoCapacity(parent);
+});

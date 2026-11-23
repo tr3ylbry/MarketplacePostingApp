@@ -55,6 +55,14 @@ function boundedJson(text: string): unknown {
   }
   value(0);space();if(at!==text.length)throw Error("json");return JSON.parse(text);
 }
+/** Shared bounded parser. Parsed data is not response provenance or authority. */
+export function parseCaptureJson(bytes: Uint8Array): unknown {
+  if (bytes.byteLength > CAPTURE_BODY_BYTES) throw Error("body");
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { throw Error("encoding"); }
+  return boundedJson(text);
+}
 export function inspectCapture(status:number, rawHeaders:readonly string[], bytes:Uint8Array):CaptureReport {
   let report=emptyCapture("captured",status);
   try {
@@ -68,8 +76,7 @@ export function inspectCapture(status:number, rawHeaders:readonly string[], byte
     if(bytes.byteLength>CAPTURE_BODY_BYTES)return {...report,outcome:"body"};
     if(!/^application\/json(?:\s*;\s*charset=utf-8)?\s*$/i.test(headers.get("content-type")?.[0]??""))return {...report,outcome:"content-type"};
     if(headers.has("content-encoding")&&headers.get("content-encoding")![0]!=="identity")return {...report,outcome:"encoding"};
-    let text:string;try{text=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{return {...report,outcome:"encoding"};}
-    let parsed:unknown;try{parsed=boundedJson(text);}catch(e){return {...report,outcome:e instanceof Error&&e.message==="duplicate"?"duplicate":"json"};}
+    let parsed:unknown;try{parsed=parseCaptureJson(bytes);}catch(e){return {...report,outcome:e instanceof Error&&e.message==="encoding"?"encoding":e instanceof Error&&e.message==="duplicate"?"duplicate":"json"};}
     report={...report,json:true,topLevel:type(parsed)};
     if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
       const body=parsed as Record<string,unknown>;report.imageUrl=urlShape(body.imageUrl);report.maximumUrl=urlShape(body.maxDimensionImageUrl);

@@ -1,6 +1,6 @@
 # Diagnostic image-verification persistence
 
-This internal foundation records one-use diagnostic accounting. It has **no runtime entry point, network client, model wiring or response-proof issuer**. A reservation, committed intent, successful context check or HTTP-shaped outcome is not permission to request an image, provider provenance, remote ownership, decoded-image acceptance or a usable association.
+This internal foundation records one-use diagnostic accounting. The repository has **no runtime entry point, network client, model wiring or response-proof issuer**. The [milestone2 internal workflow](ebay-diagnostic-image-workflow.md) now composes it with authenticated context, native fresh-response handoff and the bounded downloader, while remaining disconnected from normal application/manual entry points. A reservation, committed intent, successful context check or HTTP-shaped outcome is not permission to request an image, provider provenance, remote ownership, decoded-image acceptance or a usable association.
 
 Normal EPS transport, real receipt/association admission and Inventory writes remain disabled. The prior capture remains unknown/unassociated with its original fences, report, review deadlines and exhausted request budget. Missing historical URLs cannot be reconstructed or used by this foundation.
 
@@ -24,6 +24,7 @@ Reserve only while the exact owned parent is **capture-only/preparing/unfenced**
 | `reserveVerification` | Atomically insert prepared/revision 0 under current owned context; permanently consume action and parent. |
 | `recordRequestIntent` | Exact CAS prepared → intent-recorded/revision 1. Require the parent's exact next fenced revision, unknown state, original content identities and live context. Stamp all intent/deadline fields together, or roll everything back. |
 | `checkIntentContext` | Read-only locked revalidation after the last potentially blocking context read. No renewal, credential construction, new intent or send permission. Outcomes/overflow prohibit a fresh current-intent check. |
+| `window` | Internal read-only deadline snapshot, with PostgreSQL microseconds explicitly floored to JavaScript milliseconds. Existing SQL wall-time authorization follows all blocking reads; the returned numbers do not replace the final guard. |
 | `closePrepared` | Exact CAS to a fixed closed reason. Repeating the same acknowledged closure is inert. Never reset an intent or release history. |
 | `recordOutcome` | Append strictly bounded original-binding evidence, including late/cancelled/contradictory facts. Exact retries return the original evidence identity before checking the distinct-record budget. |
 | `status` | Owner-scoped phase/hasOutcome/late/conflict/overflow/detached flags and literal `associated:false`. No URL, secret, identity label, private binding, ownership or positive send flag. Missing/foreign rows are absent; they are not reconstructed. |
@@ -42,7 +43,7 @@ SQL reuses the existing exact capture authorization function **after every poten
 
 The preparation lease is at most 30 seconds, shortened by parent/review/session/access/refresh/policy deadlines. At intent, response receipt must be finite, no later than the trusted database clock. The exact fenced parent revision establishes local sequence; its existing millisecond-rounded timestamp is not treated as a microsecond causal clock. Effective use ends at the earliest of all those deadlines, receipt +30 seconds, or finite provider expiry −60 seconds. Total request deadline is at most 10 seconds from intent, shortened by the same bounds. Missing/invalid/insufficient times refuse atomically. These are application limits, not provider availability guarantees.
 
-The read-only final guard performs its authoritative check after its last blocking read. A future reviewed workflow would additionally consume a genuine operation-local fresh-response proof, check cancellation/elapsed deadlines immediately before first HTTP bytes and prove at-most-one dispatch and settlement-aware capacity. No asynchronous context snapshot may follow final authorization. No cross-system atomicity, exactly-once network delivery, recall or remote erasure is claimed.
+The read-only final guard performs its authoritative check after its last blocking read. The new internal workflow additionally consumes an operation-local native fresh-response handle, checks cancellation/elapsed deadlines immediately before first HTTP bytes and composes at-most-one dispatch with settlement-aware capacity. Synthetic/local tests establish that code path, not actual provider provenance/compatibility. No asynchronous context snapshot follows final authorization. No cross-system atomicity, exactly-once network delivery, recall or remote erasure is claimed.
 
 ## Strict evidence and privacy
 
@@ -78,6 +79,6 @@ npx vitest run --config vitest.integration.config.ts src/infrastructure/reposito
 npm run check
 ```
 
-Actual exits/counts and exact-head CI belong in the PR and private project records. Passing these tests proves local persistence/accounting only. Fresh-response provenance, a real resolver/pinned connection/TLS/HTTP adapter, raw URL contract, decoding/visual ingestion, wire settlement, association admission and any future exact-commit/content/budget experiment remain separately reviewed gates. No real request or experiment is authorized by this guide.
+Actual exits/counts and exact-head CI belong in the PR and private project records. Passing these persistence tests proves local accounting only. The [milestone2 integration](ebay-diagnostic-image-workflow.md) adds native response-to-download composition and synthetic/local wire evidence. Actual provider compatibility/provenance, decoding/visual ingestion, association admission and any future exact-commit/content/budget experiment remain separate gates. No real request or experiment is authorized by this guide.
 
-The [milestone1 safe downloader](ebay-safe-image-downloader.md) now supplies an unwired resolver/pinned-TLS/anonymous-HTTP boundary with synthetic/local wire evidence. It does not grant request authority, wire this component, prove provider compatibility or admit media; milestone2 composition remains separate.
+The [milestone1 safe downloader](ebay-safe-image-downloader.md) supplies the resolver/pinned-TLS/anonymous-HTTP primitive used only by the internal diagnostic composition. It does not grant request authority, enable normal transport, prove provider compatibility or admit media.
