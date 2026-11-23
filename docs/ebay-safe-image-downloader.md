@@ -1,0 +1,70 @@
+# Safe image downloader: milestone 1
+
+This is an implemented, internal Node boundary with synthetic/local wire evidence. It is **not wired to the app, capture workflow, offline model, diagnostic ledgers, routes, UI, CLI or jobs**. No real image host was resolved or contacted. Actual eBay compatibility, genuine response provenance, decoded pixels and usable-media admission are later milestones. Normal EPS transport, real receipt/association admission and Inventory writes remain disabled.
+
+## Interface and claims
+
+`startImageDownload` in [imageDownloader.ts](../src/infrastructure/ebay/imageDownloader.ts) returns one operation with `result`, `settled` and idempotent `cancel()`. One invocation permits at most one DNS TCP exchange, one selected numeric TLS connection and one GET. It never retries, follows redirects, requests HEAD/getImage/maximum-image variants or chooses another address/server.
+
+Its input is internal raw URL/receipt/expiry/context-deadline data and a required `beforeRequest` callback. **These inputs are not authentication, a fresh-response proof or a consumed durable action.** A candidate is not request permission. There is no operational entry point or enabling environment flag. Milestone 2 must create the trusted caller and durable one-use composition before anyone can use this with real data.
+
+Successful data is a bounded `Uint8Array` of **unverified diagnostic bytes**, with a fixed diagnostic marking `unverified:true` and `associated:false`. No decode, metadata-safety, visual comparison, ownership or persistence is inferred. Failure returns no body and fixed categories/capped counts only; exceptions, URLs, query values and native request/socket objects are not returned. The settlement label describes the observation at result time; await `settled` separately for actual resource cleanup/capacity release.
+
+## Policy and resolution
+
+The pure [address-set gate](../src/infrastructure/ebay/imageAddressSetPolicy.ts) reuses the reviewed [numeric policy](ebay-image-public-address-policy.md). It accepts 1–16 raw entries with exactly address/family fields, numeric family 4/6 and literals at most 45 characters. Oversized arrays refuse before element traversal; sparse arrays, accessors, extra fields and malformed members refuse. Every entry is checked, including duplicates. Any blocked/unclassified member refuses the whole set; only then is the first reported candidate copied/canonicalized/frozen. No input or time override can renew the pinned snapshot: its exclusive cutoff remains **2027-02-20T20:31:27.970Z**.
+
+[The resolver](../src/infrastructure/ebay/imageDownloadDns.ts) reads only the configured numeric recursive-server list through Node's [`dns.getServers`](https://nodejs.org/docs/latest-v24.x/api/dns.html#dnsgetservers). It pins the first server and sends exactly two framed questions, A and AAAA, over one TCP connection. No OS search list, hostname lookup for that server, UDP, fallback server, retry or follow-up CNAME query is used. Queries have distinct IDs derived from a random seed; both matching replies must finish. Reported order is response-arrival order, preserving each reply's address order, without family preference.
+
+TCP framing and DNS field/compression handling follow the bounded subset of [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035.html) and [DNS-over-TCP requirements](https://www.rfc-editor.org/rfc/rfc7766.html). This avoids depending on a resolver wrapper that hides truncation/fallback details, at the cost of a small explicit codec and conservative compatibility:
+
+- At most 16 KiB per response, two responses, 128 resource records per response, 16 backward compression hops/name, bounded label/name lengths and eight complete CNAME links. Combined returned addresses are limited to 16 before the set gate.
+- Exact question/ID/type/class, QR/opcode/recursive-response/reserved/truncation flags, response codes, lengths and relevant answer records are checked. Truncated/error/malformed/partial/contradictory replies refuse. Unknown answer types, unrelated answers, duplicate/conflicting aliases, loops and CNAME-only incomplete results refuse.
+- Successful direct empty NOERROR reports can represent this recursive resolver's NODATA. NXDOMAIN remains distinct; inconsistent family codes or canonical names refuse. Both empty results yield no candidate. Bounded authority/additional data is skipped, never followed or used as an address/authority claim; arbitrary extension semantics are not validated.
+
+This establishes only what one configured recursive server reported for those two questions. It is not DNSSEC validation, an atomic DNS snapshot, authoritative/global A/AAAA completeness, a proof of routing or image-host ownership. TCP53-blocked networks, legitimate CNAME/negative-result variants and unsupported extensions may fail conservatively. No weaker fallback is added. Every reported candidate still faces public-address policy and actual peer/TLS checks.
+
+## One pinned TLS connection and anonymous HTTP
+
+[The transport](../src/infrastructure/ebay/imageDownloadTransport.ts) connects directly to one canonical numeric address/family, with `autoSelectFamily:false`, a rejecting lookup callback and fixed destination port443. It supplies exact `i.sandbox.ebayimg.com` SNI/certificate identity, normal chain/hostname verification, explicit bundled public CA roots, minimum TLS1.2 and HTTP/1.1 ALPN. Explicit roots avoid extra/system private trust discovery; no client key/cert/PFX, proxy, environment credential discovery or cached TLS session is supplied. This intentionally excludes private/system-added CAs.
+
+Node's supported [`tls.connect`/hostname checking](https://raw.githubusercontent.com/nodejs/node/v24.14.1/doc/api/tls.md) remains enabled. Actual peer address/family/port, encryption, authorization, certificate hostname and negotiated protocol are checked before HTTP construction and again before send. A closed or already buffered unsolicited connection is refused. No HTTP bytes are intentionally sent before these checks and the final callback.
+
+The HTTPS request uses the verified socket through `createConnection`, **without an Agent**. Installed Node24.14.1 `_http_client`/`https` source was inspected: supplying `createConnection` with no agent uses that socket; `agent:false` instead constructs an Agent and is deliberately avoided. A second factory invocation refuses. There is no pool, proxy or second DNS path. See the supported [HTTP connection options](https://nodejs.org/docs/latest-v24.x/api/http.html#httprequestoptions-callback).
+
+The exact raw policy is a conservative **application restriction**, not universal eBay grammar: lowercase `https://i.sandbox.ebayimg.com/`, no explicit port/user-info/fragment/controls/backslashes, visible ASCII up to8192bytes, 1–16 nonempty path segments up to512bytes, no dot/separator/unsafe/nested escape normalization. Parsed serialization must equal raw input. Accepted opaque query bytes/order/duplicates/empty delimiters/percent case are preserved; no query interpretation, normalization, fingerprint or derived variant exists. The unchanged offline model remains synthetic; the new transport does not turn its outputs into authority.
+
+Exactly GET plus Host, Accept(PNG/JPEG), Accept-Encoding(identity) and Connection(close) are sent. No caller headers, Authorization, Proxy-Authorization, cookies, referrer or credentials. The request target is passed as raw `path`, never rebuilt through URLSearchParams. Local servers independently observe its exact plaintext bytes after TLS.
+
+## HTTP and resource bounds
+
+Node's strict HTTP parser is retained with `maxHeaderSize:16384` and a 129-pair sentinel. `maxHeadersCount` can truncate retained fields, so an independent raw-header monitor enforces **128 pairs and16KiB total header bytes including status/CRLF**, before acceptance. It rejects all duplicate names, folding/controls and ambiguous framing. No permissive parser or duplicate joining is enabled. The [Node HTTP API](https://nodejs.org/docs/latest-v24.x/api/http.html) and installed parser/client source underpin these choices.
+
+Only status200 and exact PNG/JPEG MIME with absent/identity Content-Encoding are accepted. Redirects, informational/upgrade/connect responses, challenges, Set-Cookie, trailer declarations/received trailers, unsupported encodings/connection tokens and ambiguous lengths fail. Content-Length, chunked and connection-close bodies are handled by the strict parser. Actual streamed bytes are counted independently; empty, over1MiB, interrupted, malformed or length-mismatched bodies fail. An extra application ceiling of **2MiB+16KiB total plaintext wire bytes** bounds excessive chunk/framing overhead. That ceiling can reject pathological but valid chunking.
+
+A fixed1MiB body buffer bounds accumulation rather than retaining arbitrarily many tiny chunks. Accepted bytes are copied to their returned owner, and staging buffers/references are cleared after settlement. The parser/TLS/OS may already have a bounded native/read chunk in flight when a limit is detected; this is not a promise of byte-perfect native allocation or immediate physical erasure. Bytes arriving after a connection is destroyed cannot be inspected. No decompression or image decoder runs.
+
+The total window is at most **10seconds across DNS, TLS, callback and body**, shortened by every supplied deadline, receipt+30seconds, expiry−60seconds and policy cutoff. Current wall time and monotonic elapsed time are checked across transitions; rollback/nonfinite/erroring clocks refuse. Phase changes never renew the window. A timer stops subsequent work, and synchronous checks immediately precede send. Event-loop blocking can delay timer delivery; these are eligibility/resource controls, not hard real-time guarantees.
+
+Existing shared [two-slot/no-queue capacity](../src/application/photoCapacity.ts) is used per process. Timeout/cancellation can return an unsettled refusal while sockets or the callback still run. Their actual close/promise settlement retains capacity; abort is not assumed complete. An uncooperative resource/callback can occupy a slot indefinitely. No bypass, forced slot release, background retry or distributed-capacity claim is added. Await operation settlement before teardown; returned bytes remain the caller's responsibility.
+
+## Evidence and test substitutions
+
+Tests block public networking, SDK/DB/private configuration access and permit only task-owned loopback fixture ports. No public resolver/image server, provider resource or real returned URL is used.
+
+- Pure/controlled tests cover all set/policy/codec bounds, clocks, partial resolution, late settlement and shared capacity, with legitimate controls beside refusal cases.
+- Actual TCP DNS fixtures receive both framed questions and serve invented records without forwarding. Actual TLS and raw HTTP fixtures observe SNI, native chain/hostname rejection, exact GET bytes, headers, parser/framing/body limits, cancellation, socket closure and a genuine ten-second total timeout.
+- For successful local wire cases only, test-module mocks substitute loopback **after** exercising the real numeric classifier on invented public answers; they redirect the fixed443 transport to an ephemeral fixture port and add a synthetic test CA. The observed remote-port field is substituted correspondingly. Production arguments are asserted first. Production has no host/port/trust option, environment bypass or test factory. Loopback remains blocked by the actual address policy.
+- Peer mismatch and certificate failures are real local observations; synthetic flag/IPv6 peer tests are marked as facts, not native IPv6/public443 proof. Local tests do not prove actual eBay DNS, certificate, URL compatibility, authorization, pixels or ingestion.
+
+The committed synthetic leaf key is deliberately public test material; it has no real-account use. The temporary CA signing key was deleted and no system/browser trust was installed. Test trust and routing substitutions do not appear in the production API.
+
+The adversarial unsolicited-response test initially reproduced a gap: a valid TLS server could buffer bytes while the pre-send callback waited. A final buffered-byte check now refuses before GET; failing-before/passing-after evidence is retained. Earlier harness packaging/type/setup failures are also preserved in PR/private validation history. Counts, actual check exits and exact-head CI belong there.
+
+## Milestone 2 handoff — not implemented
+
+A later reviewed orchestrator must authenticate the app owner/session, verify seller/connection/config/grant/source/derivative versions, reserve before upload fencing, consume a genuine fresh-response primary-URL proof synchronously and durably record one GET intent before starting this client. It must pass conservatively converted deadlines without replacing full-precision SQL authorization, and implement the callback with its **last** post-lock live-context authorization after all blocking reads. No database transaction/locks may cross network work; no further async snapshot may follow final authorization. Cancellation/current deadlines are still checked just before bytes; cross-system atomicity is not claimed.
+
+It must retain bounded late/contradictory diagnostic evidence without admitting a receipt/association, preserve permanent source/derivative/action fences, and never reconstruct or resume an old capability. Image decode/visual matching, real URL/receipt admission and any exact-commit/content/request-budget experiment need separate authorization. Input numbers, a successful callback, local fixture response or downloaded bytes cannot substitute for these proofs.
+
+The original capture remains **unknown/unassociated** with its permanent fences/report/dates; its **3/3 budget is exhausted**. No new live budget, normal EPS transport, real admission, Inventory write or deployment is authorized by milestone1 implementation.

@@ -79,3 +79,5 @@ npm run check
 ```
 
 Actual exits/counts and exact-head CI belong in the PR and private project records. Passing these tests proves local persistence/accounting only. Fresh-response provenance, a real resolver/pinned connection/TLS/HTTP adapter, raw URL contract, decoding/visual ingestion, wire settlement, association admission and any future exact-commit/content/budget experiment remain separately reviewed gates. No real request or experiment is authorized by this guide.
+
+The [milestone1 safe downloader](ebay-safe-image-downloader.md) now supplies an unwired resolver/pinned-TLS/anonymous-HTTP boundary with synthetic/local wire evidence. It does not grant request authority, wire this component, prove provider compatibility or admit media; milestone2 composition remains separate.
