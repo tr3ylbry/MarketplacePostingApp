@@ -13,6 +13,17 @@ export function dnsFixtureResponse(question: Buffer, addresses = ["1.1.1.1"], fl
   });
   const message = Buffer.concat([body,...records]), frame = Buffer.alloc(2); frame.writeUInt16BE(message.length); return Buffer.concat([frame,message]);
 }
+/** Synthetic positive A and terminal SOA-backed AAAA NODATA for one alias. */
+export function dnsAliasFixtureResponse(question: Buffer): Buffer {
+  const type=question.readUInt16BE(question.length-4),q=Buffer.from(question);
+  const name=(s:string)=>Buffer.concat([...s.split(".").map(v=>Buffer.concat([Buffer.from([v.length]),Buffer.from(v)])),Buffer.from([0])]);
+  const record=(owner:Buffer,kind:number,data:Buffer)=>{const h=Buffer.alloc(10);h.writeUInt16BE(kind);h.writeUInt16BE(1,2);h.writeUInt32BE(60,4);h.writeUInt16BE(data.length,8);return Buffer.concat([owner,h,data]);};
+  const alias=name("alias.invalid.test"),cname=record(Buffer.from([0xc0,0x0c]),5,alias),timers=Buffer.alloc(20);
+  [1,3600,600,86400,60].forEach((n,i)=>timers.writeUInt32BE(n,i*4));
+  q.writeUInt16BE(0x8180,2);q.writeUInt16BE(type===1?2:1,6);q.writeUInt16BE(type===1?0:1,8);
+  const terminal=type===1?record(alias,1,Buffer.from([1,1,1,1])):record(name("invalid.test"),6,Buffer.concat([name("ns.invalid.test"),name("hostmaster.invalid.test"),timers]));
+  const message=Buffer.concat([q,cname,terminal]),length=Buffer.alloc(2);length.writeUInt16BE(message.length);return Buffer.concat([length,message]);
+}
 export async function localImageDns(respond: (question: Buffer, socket: net.Socket, index: number) => void = (q,s) => { s.write(dnsFixtureResponse(q)); }) {
   const sockets = new Set<net.Socket>(), questions: Buffer[] = [];
   let connections=0;

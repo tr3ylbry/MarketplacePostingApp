@@ -1,13 +1,14 @@
 import dns from "node:dns";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
-import { IMAGE_DOWNLOAD_HOST, refuseDownload, ImageDownloadRefusal } from "./imageDownloadPolicy";
+import { IMAGE_DOWNLOAD_HOST } from "./imageDownloadPolicy";
 import { downloadDeferred, type ImageDownloadWork } from "./imageDownloadWork";
 import type { ImageAddressCandidate } from "./imageAddressSetPolicy";
+import { ImageDnsRefusal, type ImageDnsDiagnostic } from "./imageDownloadDiagnostics";
 
 export const IMAGE_DNS_MESSAGE_LIMIT = 16_384;
-const bad = () => refuseDownload("dns");
-function nameAt(packet: Buffer, start: number): { name: string; end: number } {
+const bad = (reason: "invalid-message" | "negative-incomplete" = "invalid-message"): never => { throw new ImageDnsRefusal("parse", reason); };
+function nameAt(packet: Buffer, start: number, opaqueLabels = false): { name: string; end: number } {
   let at = start, end = -1, hops = 0, length = 0;
   const labels: string[] = [];
   for (let count = 0; count < 128; count++) {
@@ -22,9 +23,13 @@ function nameAt(packet: Buffer, start: number): { name: string; end: number } {
     }
     if (size > 63 || at + size > packet.length) return bad();
     if (size === 0) return { name: labels.join(".").toLowerCase(), end: end < 0 ? at : end };
-    const label = packet.subarray(at, at + size).toString("latin1");
-    if (!/^[a-z0-9_-]+$/i.test(label) || (length += size + 1) > 254) return bad();
-    labels.push(label); at += size;
+    if ((length += size + 1) > 254) return bad();
+    if (!opaqueLabels) {
+      const label = packet.subarray(at, at + size).toString("latin1");
+      if (!/^[a-z0-9_-]+$/i.test(label)) return bad();
+      labels.push(label);
+    }
+    at += size;
   }
   return bad();
 }
@@ -36,6 +41,17 @@ export function imageDnsQuestion(id: number, type: 1 | 28): Buffer {
   const frame = Buffer.alloc(packet.length + 2); frame.writeUInt16BE(packet.length); packet.copy(frame, 2); return frame;
 }
 export interface ImageDnsAnswer { code: 0 | 3; canonical: string; addresses: readonly ImageAddressCandidate[] }
+interface NegativeSoa { owner: string; klass: number; start: number; end: number }
+function terminalNegativeSoa(packet: Buffer, records: readonly NegativeSoa[], canonical: string) {
+  if (records.length !== 1) return false;
+  const soa = records[0];
+  if (soa.klass !== 1 || soa.owner && canonical !== soa.owner && !canonical.endsWith("." + soa.owner)) return false;
+  // RFC1035 SOA contains two wire-format names and five uint32 fields.
+  // Those names are framing only, not connection candidates; mailbox labels
+  // need not use the preferred hostname alphabet enforced for CNAME targets.
+  const mname = nameAt(packet, soa.start, true), rname = nameAt(packet, mname.end, true);
+  return rname.end + 20 === soa.end;
+}
 /** Restrictive bounded DNS grammar. No CNAME follow-up, search list or repair. */
 export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): ImageDnsAnswer {
   if (packet.length < 12 || packet.length > IMAGE_DNS_MESSAGE_LIMIT || packet.readUInt16BE(0) !== id) return bad();
@@ -47,6 +63,8 @@ export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): I
   if (q.name !== IMAGE_DOWNLOAD_HOST || at + 4 > packet.length || packet.readUInt16BE(at) !== type || packet.readUInt16BE(at + 2) !== 1) return bad();
   at += 4;
   const aliases = new Map<string, string>(), records: Array<{ owner: string; address: string; family: 4 | 6 }> = [];
+  const negativeSoas: NegativeSoa[] = [];
+  let authorityNameServer = false;
   for (let i = 0; i < answers + authority + additional; i++) {
     const owner = nameAt(packet, at); at = owner.end;
     if (at + 10 > packet.length) return bad();
@@ -63,6 +81,9 @@ export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): I
         const address = type === 1 ? [...packet.subarray(at, end)].join(".") : Array.from({ length: 8 }, (_, n) => packet.readUInt16BE(at + n * 2).toString(16)).join(":");
         records.push({ owner: owner.name, address, family: type === 1 ? 4 : 6 });
       }
+    } else if (i < answers + authority) {
+      if (kind === 6) negativeSoas.push({ owner: owner.name, klass, start: at, end });
+      if (kind === 2) authorityNameServer = true;
     }
     at = end;
   }
@@ -73,59 +94,83 @@ export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): I
     if (seen.has(canonical)) return bad();
     seen.add(canonical); canonical = aliases.get(canonical)!;
   }
-  // Reject unrelated answers and incomplete CNAME-only results. An empty direct
-  // NOERROR answer is only this resolver's NODATA report, not global absence.
-  if (seen.size !== aliases.size || records.some(r => r.owner !== canonical) || aliases.size && records.length === 0) return bad();
+  if (seen.size !== aliases.size || records.some(r => r.owner !== canonical)) return bad();
+  // RFC2308 permits a CNAME chain before terminal NODATA/NXDOMAIN. Admit only
+  // our bounded SOA-backed form; an NS referral or unproven CNAME-only result
+  // is not permission for a follow-up query. This is one resolver's report,
+  // never authoritative/global absence or an address candidate by itself.
+  if (records.length === 0) {
+    if (aliases.size || negativeSoas.length) {
+      if (!terminalNegativeSoa(packet, negativeSoas, canonical)) return bad("negative-incomplete");
+    } else if (code === 0 && authorityNameServer) return bad("negative-incomplete");
+  }
   return { code: code as 0 | 3, canonical, addresses: records.map(({ address, family }) => Object.freeze({ address, family })) };
 }
 function configuredServer(): { host: string; port: number; family: 4 | 6 } {
   // OS recursive resolver configuration only; no hostname or credential lookup.
   // Pin the first numeric server. No alternate server, UDP or TCP retry.
   const value = dns.getServers()[0];
-  if (!value || value.length > 64) return bad();
+  const invalid = (): never => { throw new ImageDnsRefusal("configuration", "invalid-server"); };
+  if (!value || value.length > 64) return invalid();
   let host = value, port = 53;
   if (value.startsWith("[")) {
-    const m = /^\[([^\]]+)\](?::([0-9]{1,5}))?$/.exec(value); if (!m) return bad();
+    const m = /^\[([^\]]+)\](?::([0-9]{1,5}))?$/.exec(value); if (!m) return invalid();
     host = m[1]; port = m[2] ? Number(m[2]) : 53;
   } else if (net.isIP(value) === 0) {
-    const m = /^([^:]+):([0-9]{1,5})$/.exec(value); if (!m) return bad(); host = m[1]; port = Number(m[2]);
+    const m = /^([^:]+):([0-9]{1,5})$/.exec(value); if (!m) return invalid(); host = m[1]; port = Number(m[2]);
   }
   const family = net.isIP(host);
-  if ((family !== 4 && family !== 6) || port < 1 || port > 65535) return bad();
+  if ((family !== 4 && family !== 6) || port < 1 || port > 65535) return invalid();
   return { host, port, family };
 }
 export function resolveImageDownloadAddresses(): ImageDownloadWork<readonly ImageAddressCandidate[]> {
   const ready = downloadDeferred<readonly ImageAddressCandidate[]>(), settled = downloadDeferred<void>();
   let socket: net.Socket | undefined, buffer = Buffer.alloc(0), failed = false, complete = false, total = 0;
-  const fail = () => { failed = true; ready.reject(new ImageDownloadRefusal("dns")); socket?.destroy(); };
+  let phase: ImageDnsDiagnostic["phase"] = "configuration", failure: ImageDnsRefusal | undefined;
+  const fail = (reason: ImageDnsDiagnostic["reason"], error?: unknown) => {
+    failure ??= error instanceof ImageDnsRefusal ? error : new ImageDnsRefusal(phase, reason, error);
+    failed = true; ready.reject(failure); socket?.destroy();
+  };
   try {
     const server = configuredServer(), first = randomBytes(2).readUInt16BE(), second = first ^ 0xffff;
     const expected = new Map<number, 1 | 28>([[first, 1], [second, 28]]), replies = new Map<number, ImageDnsAnswer>();
-    socket = net.createConnection({ ...server, autoSelectFamily: false, lookup: () => { throw new ImageDownloadRefusal("dns"); } });
-    socket.on("error", fail);
-    socket.once("close", () => { if (!complete) ready.reject(new ImageDownloadRefusal("dns")); buffer = Buffer.alloc(0); if (failed || !complete) settled.reject(new ImageDownloadRefusal("dns")); else settled.resolve(); });
-    socket.once("connect", () => { if (failed) return; socket!.setNoDelay(true); socket!.write(Buffer.concat([imageDnsQuestion(first, 1), imageDnsQuestion(second, 28)])); });
+    phase = "connect";
+    socket = net.createConnection({ ...server, autoSelectFamily: false, lookup: () => { throw new ImageDnsRefusal("configuration", "invalid-server"); } });
+    socket.on("error", error => fail("native-error", error));
+    socket.once("close", () => {
+      if (!complete) { failure ??= new ImageDnsRefusal(phase, "closed"); ready.reject(failure); }
+      buffer = Buffer.alloc(0); if (failed || !complete) settled.reject(failure); else settled.resolve();
+    });
+    socket.once("connect", () => {
+      if (failed) return;
+      phase = "exchange";
+      try { socket!.setNoDelay(true); socket!.write(Buffer.concat([imageDnsQuestion(first, 1), imageDnsQuestion(second, 28)])); }
+      catch (error) { fail("native-error", error); }
+    });
     socket.on("data", chunk => {
       try {
-        if (failed || complete || !Buffer.isBuffer(chunk)) return fail();
+        if (failed || complete || !Buffer.isBuffer(chunk)) return fail("invalid-frame");
+        phase = "framing";
         total += chunk.length;
-        if (total > 2 * (IMAGE_DNS_MESSAGE_LIMIT + 2)) return fail();
+        if (total > 2 * (IMAGE_DNS_MESSAGE_LIMIT + 2)) return fail("limit");
         buffer = Buffer.concat([buffer, chunk]);
         while (buffer.length >= 2) {
           const length = buffer.readUInt16BE();
-          if (length < 12 || length > IMAGE_DNS_MESSAGE_LIMIT) return fail();
+          if (length < 12 || length > IMAGE_DNS_MESSAGE_LIMIT) return fail("invalid-frame");
           if (buffer.length < length + 2) break;
           const packet = buffer.subarray(2, length + 2), id = packet.readUInt16BE(), type = expected.get(id);
-          if (!type || replies.has(type)) return fail();
+          if (!type || replies.has(type)) return fail("invalid-frame");
           replies.set(type, parseImageDnsAnswer(packet, id, type)); buffer = buffer.subarray(length + 2);
         }
+        phase = "exchange";
         if (replies.size === 2) {
+          phase = "combine";
           const a = replies.get(1)!, aaaa = replies.get(28)!;
-          if (buffer.length || a.code !== aaaa.code || a.canonical !== aaaa.canonical || a.addresses.length + aaaa.addresses.length > 16) return fail();
+          if (buffer.length || a.code !== aaaa.code || a.canonical !== aaaa.canonical || a.addresses.length + aaaa.addresses.length > 16) return fail("inconsistent-answers");
           complete = true; ready.resolve(Object.freeze([...replies.values()].flatMap(reply => reply.addresses))); socket!.destroy();
         }
-      } catch { fail(); }
+      } catch (error) { fail(error instanceof ImageDnsRefusal ? "invalid-message" : "native-error", error); }
     });
-  } catch { fail(); if (!socket) settled.resolve(); }
-  return { ready: ready.promise, settled: settled.promise, abort: fail };
+  } catch (error) { fail(error instanceof ImageDnsRefusal ? "invalid-server" : "native-error", error); if (!socket) settled.resolve(); }
+  return { ready: ready.promise, settled: settled.promise, abort: () => fail("aborted") };
 }
