@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/infrastructure/db/schema";
 import { openLocalDatabasePool,localDatabase,LOCAL_ORIGIN } from "./local-session";
 import { assertVerificationJournal } from "./image-verification-context";
-import { assertLocalOperatorSource,localOperatorContext } from "./local-image-operator-source";
+import { assertLocalOperatorSource,assertLocalOperatorLaunchEnvironment,localOperatorContext } from "./local-image-operator-source";
 import { DrizzleLocalImageOperatorRepository } from "../src/infrastructure/repositories/drizzleLocalImageOperatorRepository";
 import { ebayConfig } from "../src/infrastructure/ebay/config";
 import { PHOTO_RECIPE } from "../src/infrastructure/storage/photoDerivative/transformPhoto";
@@ -23,9 +23,11 @@ async function main() {
   const binding={id:randomUUID(),head:values["reviewed-head"],tree:values["reviewed-tree"],root};
   // Verify source before any private configuration read or database construction.
   assertLocalOperatorSource(binding);
+  assertLocalOperatorLaunchEnvironment(process.env);
   loadEnvironment({path:".env.local",quiet:true});loadEnvironment({path:".env.https.local",quiet:true});
   const env:NodeJS.ProcessEnv={...process.env,NODE_ENV:"development",BETTER_AUTH_URL:LOCAL_ORIGIN,VERCEL_BLOB_RETRIES:"0",
     LOCAL_IMAGE_OPERATOR_ID:binding.id,LOCAL_IMAGE_OPERATOR_HEAD:binding.head,LOCAL_IMAGE_OPERATOR_TREE:binding.tree,LOCAL_IMAGE_OPERATOR_ROOT:root};
+  assertLocalOperatorLaunchEnvironment(env);
   if(process.versions.node.split(".")[0]!=="24"||!localOperatorContext(env))throw Error();
   const url=localDatabase(env),pool=openLocalDatabasePool(env,"execution",true);
   pool.on("error",()=>{});
