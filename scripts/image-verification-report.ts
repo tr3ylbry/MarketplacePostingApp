@@ -19,6 +19,7 @@ const visual = z.strictObject({
   recipe: z.literal(IMAGE_COMPARISON_RECIPE), verdict: z.enum(["match", "mismatch", "inconclusive"]),
   reason: z.enum(["matched", "reference", "unsupported", "decode", "geometry", "orientation", "marker", "color", "similarity", "cancelled", "deadline", "context", "busy"]),
   decoding: check, geometry: check, orientation: check, marker: check, color: check, similarity: check, settlement, associated: z.literal(false),
+  encodedDimensions: z.strictObject({ width: z.number().int().min(0).max(0xffffffff), height: z.number().int().min(0).max(0xffffffff) }).nullable(),
   metrics: z.strictObject({ orientationErrors: z.number().int().min(0).max(6), orientationMargin: margin,
     markerErrors: z.number().int().min(0).max(144), markerMargin: margin, mae: delta, rmse: delta, tileMae: delta, anchorDelta: delta }).nullable(),
 });

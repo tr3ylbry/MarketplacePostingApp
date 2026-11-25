@@ -17,11 +17,20 @@ The returned internal summary separates:
 | `retrieved` / network diagnostic | Bytes were returned by the reviewed downloader; this remains a known observation even if later comparison or acknowledgement fails. |
 | `visual.decoding` | `passed` only after fully decoding accepted input to exact RGB pixels. Framing/codec failure cannot pass; unsupported/geometry refusal can remain `not-run`. |
 | `visual.geometry` / `orientation` | Exact dimensions and the fixed separate orientation-cue samples agree. No rotation/mirror/crop search. This is a fixture-specific cue check, not general pose inference. |
+| `visual.encodedDimensions` | Bounded `{width,height}` from the PNG IHDR or JPEG SOF geometry gate on a size refusal, or the exact 500×600 dimensions after successful full decoding. These are header claims, not proof of decoded pixels. `null` means unavailable, including other framing/unsupported/decode/context failures; it never means zero dimensions. |
 | `visual.marker` | All expected marker cells from the exact derivative agree with adequate grayscale margin. |
 | `visual.color` / `similarity` | Independent color-anchor and overall pixel-error checks pass. |
 | `acknowledgement` | `not-attempted`, `recorded`, `overflow`, or `uncertain`; independent of retrieval/visual observations. `recorded` is local diagnostic acknowledgement, never remote ownership. |
 
 Every result has `associated:false`; remote state remains unknown. Visual details/metrics are transient internal results, **not new SQL evidence fields**. The fixed four-envelope/2 KiB ledgers retain only existing network/cancellation/settlement facts. No URL, query fingerprint, returned-content hash, raw metadata, image bytes or visual score is persisted. Durable visual evidence, recovery or admission would require a separate contract review.
+
+### Investigating a geometry refusal
+
+The geometry gate reads PNG width then height as unsigned 32-bit values, or JPEG SOF width/height at their distinct unsigned 16-bit offsets. A mismatch still refuses **before constructing Sharp**, with `reason:geometry`, `geometry:failed`, `decoding:not-run`, later visual checks `not-run` and `metrics:null`. Dimensions are copied as two integers in the range 0–4,294,967,295; zero or an oversized header claim is reportable but remains invalid. The report permits no additional dimension fields, strings or metadata. It does not allocate pixels from a rejected claim. Framing/CRC/unsupported-header failure before that gate supplies no dimensions.
+
+Reporting does not change the frozen recipe, 500×600 requirement, decoding/egress limits, deadlines, settlement or zeroization. It adds no durable field, fetch, fallback, resize, rotation repair or admission permission. Cancellation or stale context can discard measurements along with other visual results.
+
+A retained `geometry` failure without measured dimensions establishes only that the exact-size gate refused the response. It cannot identify the actual size or distinguish a provider transformation, a different image variant/placeholder or a parsing problem. Discarded bytes and opaque URLs cannot be reconstructed from structural reports. Synthetic PNG/JPEG controls verify header ordering, rejection and bounded reporting; they do not establish real-provider processing. Any future real measurement needs separate exact-commit approval and a fresh request budget; no old content fence or exhausted allowance may be reused.
 
 ## Versioned profile and resource bounds
 

@@ -13,15 +13,25 @@ export const COLOR_ANCHORS = Object.freeze([
   { x: 340, y: 285, width: 109, height: 49, rgb: [235, 190, 25] },
 ].map(a=>Object.freeze({...a,rgb:Object.freeze(a.rgb)})));
 export type ComparisonReason = "matched" | "reference" | "unsupported" | "decode" | "geometry" | "orientation" | "marker" | "color" | "similarity" | "cancelled" | "deadline" | "context" | "busy";
+export interface ImageComparisonDimensions { readonly width: number; readonly height: number }
 export interface ImageComparisonDiagnostic {
   recipe: string; verdict: "match" | "mismatch" | "inconclusive"; reason: ComparisonReason;
   decoding: "not-run" | "passed" | "failed"; geometry: "not-run" | "passed" | "failed";
   orientation: "not-run" | "passed" | "failed";
   marker: "not-run" | "passed" | "failed"; color: "not-run" | "passed" | "failed";
   similarity: "not-run" | "passed" | "failed"; settlement: "settled" | "unsettled";
+  encodedDimensions: Readonly<ImageComparisonDimensions> | null;
   metrics: { orientationErrors:number;orientationMargin:number;markerErrors: number; markerMargin: number; mae: number; rmse: number; tileMae: number; anchorDelta: number } | null;
   associated: false;
 }
 export class ImageComparisonError extends Error {
-  constructor(readonly reason: ComparisonReason) { super("Diagnostic image verification refused."); }
+  readonly encodedDimensions: Readonly<ImageComparisonDimensions> | null;
+  constructor(readonly reason: ComparisonReason, dimensions?: ImageComparisonDimensions) {
+    super("Diagnostic image verification refused.");
+    // Header claims only, not decoded geometry. PNG uses uint32, JPEG uint16;
+    // even zero/oversized claims are useful diagnostics, never allocation sizes.
+    const bounded = (value: number) => Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+    this.encodedDimensions = reason === "geometry" && dimensions && bounded(dimensions.width) && bounded(dimensions.height)
+      ? Object.freeze({ width: dimensions.width, height: dimensions.height }) : null;
+  }
 }

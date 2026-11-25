@@ -369,12 +369,13 @@ it.each(["session", "refresh", "lease", "review", "policy", "access"])("refuses 
   } finally { if (kind === "policy") await db.execute(sql.raw(policy)); }
 }, 45_000);
 
-it.each(["png","jpeg","different-marker","corrupt","mirror","crop"])("composes full guarded retrieval→decode→comparison for %s without admission",async kind=>{
+it.each(["png","jpeg","geometry-png","geometry-jpeg","different-marker","corrupt","mirror","crop"])("composes full guarded retrieval→decode→comparison for %s without admission",async kind=>{
  const before=Buffer.from(source.bytes),original=wire.response.before;let returned:Buffer|undefined,mime:"image/png"|"image/jpeg"="image/png";
  wire.response.before=async(req,body)=>{
   await original(req,body);const boundary=/boundary=(.+)$/.exec(req.headers["content-type"]!)![1];
   const exact=body.subarray(body.indexOf("\r\n\r\n")+4,-Buffer.byteLength(`\r\n--${boundary}--\r\n`));
   if(kind==="jpeg"){returned=await sharp(exact).jpeg({quality:85,chromaSubsampling:"4:2:0",progressive:true}).toBuffer();mime="image/jpeg";}
+  else if(kind.startsWith("geometry-")){const rotated=sharp(exact).rotate(90);if(kind==="geometry-jpeg"){returned=await rotated.jpeg().toBuffer();mime="image/jpeg";}else returned=await rotated.png().toBuffer();}
   else if(kind==="different-marker")returned=(await generateCaptureFixture()).bytes;
   else if(kind==="corrupt")returned=Buffer.from([137,80,78,71]);
   else if(kind==="mirror")returned=await sharp(exact).flop().png().toBuffer();
@@ -386,11 +387,13 @@ it.each(["png","jpeg","different-marker","corrupt","mirror","crop"])("composes f
  const spy=vi.spyOn(nativeComparison,"decodeDiagnosticImage").mockImplementation((...args)=>{expect(transactions.getStore()).not.toBe(true);return decode(...args);});
  try{
   const result=await complete();expect(result).toMatchObject({retrieved:true,acknowledgement:"recorded",associated:false,state:"unknown",reason:"completed"});
-  expect(result.visual?.verdict).toBe(["png","jpeg"].includes(kind)?"match":kind==="corrupt"?"inconclusive":"mismatch");
-  if(kind==="png"||kind==="jpeg")expect(result.visual).toMatchObject({decoding:"passed",geometry:"passed",marker:"passed",color:"passed",similarity:"passed",associated:false});
+  expect(result.visual?.verdict).toBe(["png","jpeg"].includes(kind)?"match":kind==="corrupt"||kind.startsWith("geometry-")?"inconclusive":"mismatch");
+  if(kind==="png"||kind==="jpeg")expect(result.visual).toMatchObject({decoding:"passed",geometry:"passed",encodedDimensions:{width:500,height:600},marker:"passed",color:"passed",similarity:"passed",associated:false});
+  if(kind.startsWith("geometry-"))expect(result.visual).toMatchObject({reason:"geometry",decoding:"not-run",geometry:"failed",encodedDimensions:{width:600,height:500},orientation:"not-run",marker:"not-run",color:"not-run",similarity:"not-run",metrics:null});
+  if(kind==="corrupt")expect(result.visual?.encodedDimensions).toBeNull();
   expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect(source.bytes).toEqual(before);
   expect((await parents())[0].postIntentAt).not.toBeNull();expect(await events()).toHaveLength(2);
-  expect(JSON.stringify(await events())).not.toMatch(/marker|metrics|recipe|opaque|digest|image%41/);await noAdmission();
+  expect(JSON.stringify(await events())).not.toMatch(/encodedDimensions|width|height|marker|metrics|recipe|opaque|digest|image%41/);await noAdmission();
  }finally{spy.mockRestore();returned?.fill(0);}
 });
 

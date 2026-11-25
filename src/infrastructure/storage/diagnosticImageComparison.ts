@@ -13,7 +13,7 @@ const references=new WeakMap<object,Reference>();
 export type ImageComparisonReference=Readonly<object>;
 export interface ImageComparisonOperation {result:Promise<Readonly<ImageComparisonDiagnostic>>;settled:Promise<void>;cancel():void}
 export const inconclusiveComparison=(reason:ComparisonReason,settlement:"settled"|"unsettled"="settled"):ImageComparisonDiagnostic=>({
-  recipe:IMAGE_COMPARISON_RECIPE,verdict:"inconclusive",reason,decoding:"not-run",geometry:reason==="geometry"?"failed":"not-run",orientation:"not-run",marker:"not-run",color:"not-run",similarity:"not-run",settlement,metrics:null,associated:false,
+  recipe:IMAGE_COMPARISON_RECIPE,verdict:"inconclusive",reason,decoding:"not-run",geometry:reason==="geometry"?"failed":"not-run",orientation:"not-run",marker:"not-run",color:"not-run",similarity:"not-run",settlement,encodedDimensions:null,metrics:null,associated:false,
 });
 function bound(value:Binding){
   if(!/^[a-f0-9-]{36}$/.test(value.operationId)||!/^[a-f0-9]{64}$/.test(value.derivativeDigest))throw new ImageComparisonError("context");
@@ -70,9 +70,9 @@ export function startImageComparison(handle:unknown,binding:Binding,bytes:Uint8A
       const orientation=metrics.orientationErrors===0&&metrics.orientationMargin>=policy.markerMargin;
       const color=metrics.anchorDelta<=policy.anchorDelta,similarity=metrics.mae<=policy.mae&&metrics.rmse<=policy.rmse&&metrics.tileMae<=policy.tileMae;
       result.resolve(Object.freeze({recipe:IMAGE_COMPARISON_RECIPE,verdict:orientation&&marker&&color&&similarity?"match":"mismatch",reason:!orientation?"orientation":!marker?"marker":!color?"color":!similarity?"similarity":"matched",
-        decoding:"passed",geometry:"passed",orientation:orientation?"passed":"failed",marker:marker?"passed":"failed",color:color?"passed":"failed",similarity:similarity?"passed":"failed",metrics:Object.freeze(metrics),settlement:"settled",associated:false}));
+        decoding:"passed",geometry:"passed",orientation:orientation?"passed":"failed",marker:marker?"passed":"failed",color:color?"passed":"failed",similarity:similarity?"passed":"failed",encodedDimensions:Object.freeze({width:policy.width,height:policy.height}),metrics:Object.freeze(metrics),settlement:"settled",associated:false}));
     }catch(error){const reason=error instanceof ImageComparisonError?error.reason:"decode";
-      result.resolve(Object.freeze({...inconclusiveComparison(reason),decoding:reason==="decode"?"failed":"not-run"}));
+      result.resolve(Object.freeze({...inconclusiveComparison(reason),decoding:reason==="decode"?"failed":"not-run",encodedDimensions:error instanceof ImageComparisonError?error.encodedDimensions:null}));
     }finally{returned?.fill(0);ref?.raw.fill(0);clearTimeout(timer);signal.removeEventListener("abort",abort);finish?.();done=true;settled.resolve();}
   };void run();
   return{result:result.promise,settled:settled.promise,cancel:()=>stop("cancelled")};

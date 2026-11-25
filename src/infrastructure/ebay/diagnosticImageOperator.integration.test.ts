@@ -120,6 +120,16 @@ it("runs the real manual path with signed hidden input, native local wire, exact
  expect(await db.select().from(schema.ebayOauthStates)).toEqual([]);expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect(sdk.get).toHaveBeenCalledOnce();
  const [image]=await db.select().from(schema.listingImages).where(eq(schema.listingImages.id,pins.image));expect(Date.parse(image.providerRetainUntil!)).toBeGreaterThan(Date.now()+5*60_000);
 });
+it("returns bounded rejected geometry through the operator without admission or credential changes",async()=>{
+ const before=await connection(),original=wire.response.before;
+ wire.response.before=async(req,body)=>{await original(req,body);const previous=returned!;try{returned=await sharp(previous).rotate(90).png().toBuffer();}finally{previous.fill(0);}};
+ const result=await run();expect(result.exitCode).toBe(1);
+ expect(result.report).toMatchObject({operationSettled:true,accountingComplete:true,associated:false,outcome:{state:"unknown",retrieved:true,acknowledgement:"recorded",visual:{
+  verdict:"inconclusive",reason:"geometry",decoding:"not-run",geometry:"failed",encodedDimensions:{width:600,height:500},metrics:null,associated:false}}});
+ expect(await connection()).toEqual(before);expect((await parents())[0].postIntentAt).not.toBeNull();
+ expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect(sdk.get).toHaveBeenCalledOnce();
+ expect(JSON.stringify(await db.select().from(e))).not.toMatch(/encodedDimensions|width|height/);
+});
 it.each(["listing-version","source","derivative","seller","connection","recipe","foreign","expired-session","expiring-access","access-margin","head"])("stops stale/unapproved %s before any eBay request",async kind=>{
  const o=options();if(kind==="listing-version")o.pins.listingVersion="2000-01-01T00:00:00.000Z";if(kind==="source")o.pins.sourceDigest="a".repeat(64);if(kind==="derivative")o.pins.derivativeDigest="a".repeat(64);
  if(kind==="seller")o.pins.seller="a".repeat(64);if(kind==="connection")o.pins.connectionVersion=randomUUID();if(kind==="recipe")o.comparisonRecipe="wrong-recipe";
