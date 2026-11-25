@@ -16,9 +16,10 @@ import { EBAY_DISCOVERY_SCOPES } from "../../application/ebayConnection";
 import { realMediaDigest } from "../../application/ebayRealMedia";
 import { DrizzleListingRepository } from "../repositories/drizzleListingRepository";
 import { DrizzleImageRepository } from "../repositories/drizzleImageRepository";
+import { DrizzleLocalImageOperatorRepository } from "../repositories/drizzleLocalImageOperatorRepository";
 import { DrizzleEbayImageVerificationRepository } from "../repositories/drizzleEbayImageVerificationRepository";
 import { generateVerificationFixture } from "../storage/verificationFixture";
-import { photoTransformer } from "../storage/photoDerivative/transformPhoto";
+import { photoTransformer, PHOTO_RECIPE } from "../storage/photoDerivative/transformPhoto";
 import * as comparison from "../storage/diagnosticImageDecode";
 import { EbayTokenCipher } from "./tokenCipher";
 import { ebayConfig } from "./config";
@@ -30,6 +31,7 @@ import { verificationFixtureTitle } from "../../../scripts/image-verification-co
 import type { VerificationPins,VerificationOptions } from "../../../scripts/image-verification-options";
 import * as schema from "../db/schema";
 import { OPERATOR_ROOT,OPERATOR_REQUIRED_FILES } from "../../../scripts/reviewed-checkout";
+import { localOperatorVerificationPins } from "../../../scripts/local-image-operator-pins";
 
 const sdk=vi.hoisted(()=>({get:vi.fn(),git:vi.fn()}));
 vi.mock("server-only",()=>({}));vi.mock("dotenv",()=>{throw Error("Private environment forbidden");});
@@ -52,6 +54,26 @@ const connection=async()=> (await db.select().from(schema.ebayConnections).where
 async function noAdmission(){expect(await db.select().from(schema.ebayRealMediaReceipts)).toEqual([]);expect(await db.select().from(schema.ebayRealMediaAssociations)).toEqual([]);
  expect(mediaRuntime()).toEqual({enabled:false});expect(()=>admitRealMediaEvidence({})).toThrow();}
 const run=(o=options(),signal=new AbortController().signal)=>runVerificationOperator(o,env,cookie,signal,()=>{});
+async function persistedBrowserFixture() {
+ const c=(await connection())!,repo=new DrizzleLocalImageOperatorRepository(db),id=randomUUID(),future=new Date(Date.now()+3_600_000).toISOString();
+ const actor={ownerId:owner,id:sessionId,expiresAt:future};
+ await repo.arm({id,ownerId:owner,connectionId:c.id,initialConnectionVersion:c.version,sellerKey:c.sellerId!,configHash:c.configHash,
+  reviewedHead:pins.head,reviewedTree:"a".repeat(40),derivativeRecipe:PHOTO_RECIPE,comparisonRecipe:comparison.IMAGE_COMPARISON_RECIPE,expiresAt:future});
+ const row=async()=>(await repo.activation(id,owner))!;
+ const proxy=repo.consentRepository(id,actor,(await row()).revision),state=realMediaDigest(randomUUID());
+ await proxy.begin(owner,realMediaDigest(sessionId),c.configHash,state,new Date().toISOString(),future,EBAY_DISCOVERY_SCOPES);
+ await proxy.consume(owner,realMediaDigest(sessionId),c.configHash,state,new Date().toISOString());
+ await repo.consumeCallbackIntent(id,actor,state,"exchange");await repo.consumeCallbackIntent(id,actor,state,"identity");
+ await proxy.connect(owner,(await row()).consentVersion!,{sellerId:c.sellerId,sellerLabel:c.sellerLabel,access:c.access,refresh:c.refresh,
+  accessExpiresAt:c.accessExpiresAt,refreshExpiresAt:c.refreshExpiresAt,scopes:[...EBAY_DISCOVERY_SCOPES]},new Date().toISOString());
+ const listingId=randomUUID();let active=await repo.beginFixture(id,actor,(await row()).revision,listingId);
+ active=await repo.pinFixtureContent(id,actor,active.revision,{sourceDigest:pins.sourceDigest,derivativeDigest:pins.derivativeDigest});
+ const listings=new DrizzleListingRepository(db);await listings.create(owner,{...listingFixture(),id:listingId,title:verificationFixtureTitle(source.sourceDigest)});
+ const service=createImageService(new DrizzleImageRepository(db),storage),upload=await service.prepare(owner,listingId,{filename:"generated.png",contentType:"image/png",size:source.bytes.length});
+ storage.objects.set(storage.uploads.get(upload.imageId)!.pathname,{bytes:Buffer.from(source.bytes),type:"image/png"});await service.finalize(owner,listingId,upload.imageId);
+ await repo.finalizeFixture(id,actor,active.revision,{imageId:upload.imageId,listingVersion:(await listings.getById(owner,listingId))!.updatedAt});
+ return {repo,actor,id,row};
+}
 beforeAll(async()=>{isolated=await disposableVerificationDatabase();db=isolated.db;},30000);
 beforeEach(async()=>{
  wire=await diagnosticImageWire(Number(new URL(process.env.TEST_DATABASE_URL!).port||5432));
@@ -234,4 +256,32 @@ it.each(["missing","tampered","foreign"])("refuses %s request authentication bef
 it("uses the browser's supplied trusted source root for the journal rather than the bundled module location",async()=>{
  await expect(runVerificationOperatorWithHeaders(options(),env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT+"/missing-source-root")).rejects.toMatchObject({code:"journal"});
  expect(await parents()).toEqual([]);expect(sdk.get).not.toHaveBeenCalled();expect(wire.posts).toHaveLength(0);expect(wire.image.requests).toHaveLength(0);
+});
+it("passes persisted browser activation pins through the real signed runtime and POST-fenced cleanup",async()=>{
+ const browser=await persistedBrowserFixture(),active=await browser.row(),frozen=localOperatorVerificationPins(active,isolated.name),runner=randomUUID();
+ expect(active.listingVersion).not.toBe((await new DrizzleListingRepository(db).getById(owner,active.listingId!))!.updatedAt);
+ await browser.repo.claimRun(browser.id,browser.actor,active.revision,runner);
+ const result=await runVerificationOperatorWithHeaders({...options(),pins:frozen},env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT);
+ expect(result).toMatchObject({exitCode:0,report:{operationSettled:true,accountingComplete:true,outcome:{retrieved:true,visual:{verdict:"match"},acknowledgement:"recorded"},associated:false}});
+ expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);
+ const settled=await browser.repo.settle(browser.id,owner,runner);
+ const cleanupOptions={mode:"cleanup-fixture" as const,pins:localOperatorVerificationPins(settled,isolated.name)};
+ expect((await runVerificationOperatorWithHeaders(cleanupOptions,env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT)).report).toMatchObject({cleanup:{status:"retained"},providerRequests:0});
+ // Only this synthetic mutable fixture date changes; no history/guard rewrite.
+ await db.update(schema.listingImages).set({providerRetainUntil:sql`clock_timestamp()+interval '80 milliseconds'`}).where(eq(schema.listingImages.id,frozen.image));
+ await isolated.pool.query("SELECT pg_sleep_until(provider_retain_until+interval '20 milliseconds') FROM listing_images WHERE id=$1",[frozen.image]);
+ const cleaning=await browser.repo.beginCleanup(browser.id,browser.actor,settled.revision);
+ const removed=await runVerificationOperatorWithHeaders({mode:"cleanup-fixture",pins:localOperatorVerificationPins(cleaning,isolated.name)},env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT);
+ expect(removed).toMatchObject({exitCode:0,report:{cleanup:{status:"queued"},providerRequests:0,associated:false}});
+ await expect(browser.repo.claimRun(browser.id,browser.actor,cleaning.revision,randomUUID())).rejects.toThrow();
+ expect((await browser.row()).runStartedAt).not.toBeNull();expect((await parents())[0].postIntentAt).not.toBeNull();
+ expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);await noAdmission();
+});
+it("rejects a changed listing after the persisted browser run is consumed without sending",async()=>{
+ const browser=await persistedBrowserFixture(),active=await browser.row(),frozen=localOperatorVerificationPins(active,isolated.name);
+ const consumed=await browser.repo.claimRun(browser.id,browser.actor,active.revision,randomUUID());
+ await db.update(schema.listings).set({updatedAt:sql`clock_timestamp()+interval '1 second'`}).where(eq(schema.listings.id,frozen.listing));
+ await expect(runVerificationOperatorWithHeaders({...options(),pins:frozen},env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT)).rejects.toThrow();
+ expect(await browser.row()).toEqual(consumed);expect(await parents()).toEqual([]);expect(await children()).toEqual([]);
+ expect(wire.posts).toHaveLength(0);expect(wire.image.requests).toHaveLength(0);await noAdmission();
 });

@@ -19,6 +19,7 @@ import { assertLocalOperatorSource, localOperatorContext, type LocalOperatorActi
 import { assertVerificationJournal } from "./image-verification-context";
 import { runVerificationOperatorWithHeaders } from "./image-verification-runtime";
 import { createLocalOperatorFixturePreparer } from "./local-image-operator-fixture";
+import { localOperatorVerificationPins } from "./local-image-operator-pins";
 import type { VerificationPins } from "./image-verification-options";
 import { PHOTO_RECIPE } from "../src/infrastructure/storage/photoDerivative/transformPhoto";
 import { IMAGE_COMPARISON_RECIPE } from "../src/infrastructure/storage/diagnosticImageDecode";
@@ -35,9 +36,7 @@ function match(row:LocalImageOperatorActivation|null,c:LocalOperatorActivationCo
   return row;
 }
 function pins(row:LocalImageOperatorActivation,env:NodeJS.ProcessEnv):VerificationPins {
-  if(!row.listingId||!row.imageId||!row.listingVersion||!row.connectedVersion||!row.sourceDigest||!row.derivativeDigest)throw new LocalOperatorError("context");
-  return {head:row.reviewedHead,database:databaseName(env),listing:row.listingId,image:row.imageId,listingVersion:row.listingVersion,
-    seller:row.sellerKey,connectionVersion:row.connectedVersion,sourceDigest:row.sourceDigest,derivativeDigest:row.derivativeDigest};
+  return localOperatorVerificationPins(row,databaseName(env));
 }
 async function withRepository<T>(env:NodeJS.ProcessEnv,c:LocalOperatorActivationContext,fn:(repo:DrizzleLocalImageOperatorRepository,db:ReturnType<typeof drizzle<typeof schema>>)=>Promise<T>) {
   assertLocalOperatorSource(c);

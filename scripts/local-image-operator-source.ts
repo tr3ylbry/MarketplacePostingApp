@@ -22,7 +22,7 @@ function reviewedNextWorkerOptions(env:NodeJS.ProcessEnv) {
   const memory=Math.floor(Math.floor(totalmem()/1024/1024)*0.5);
   return Number.isSafeInteger(memory)&&memory>0&&env.NODE_OPTIONS===`--max-old-space-size=${memory} --enable-source-maps`;
 }
-export const LOCAL_OPERATOR_REQUIRED_FILES=Object.freeze(["scripts/local-image-operator.ts","scripts/local-image-operator-source.ts","scripts/local-image-operator-runtime.ts",
+export const LOCAL_OPERATOR_REQUIRED_FILES=Object.freeze(["scripts/local-image-operator.ts","scripts/local-image-operator-source.ts","scripts/local-image-operator-runtime.ts","scripts/local-image-operator-pins.ts",
   "scripts/local-image-operator-fixture.ts","src/application/localImageOperatorHttp.ts","src/application/localImageOperator.ts",
   "src/infrastructure/repositories/drizzleLocalImageOperatorRepository.ts","src/infrastructure/db/localImageOperatorSchema.ts",
   "src/app/api/operator/ebay-image-verification/route.ts","src/app/operator/ebay-image-verification/page.tsx","scripts/image-verification-runtime.ts",
