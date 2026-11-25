@@ -1,6 +1,6 @@
-import { del, get, head, issueSignedToken, presignUrl } from "@vercel/blob";
+import { del, get, head, issueSignedToken, presignUrl, put } from "@vercel/blob";
 import { blobImageSourceSchema } from "../../domain/listingImage";
-import { ImageOperationError, matchesImageHeader, READ_TTL_MS, PROVIDER_READ_TTL_MS, type ProviderImageSigner, type ImageStorage, type ImageUpload } from "../../application/imageStorage";
+import { ImageOperationError, imagePathname, matchesImageHeader, READ_TTL_MS, PROVIDER_READ_TTL_MS, uploadInputSchema, type ProviderImageSigner, type ImageStorage, type ImageUpload } from "../../application/imageStorage";
 import { PrivateImagePreparationError, type PrivateImageReader } from "../../application/ebayPrivateImages";
 import { collectPrivateImage } from "./readPrivateImage";
 
@@ -8,9 +8,10 @@ import { collectPrivateImage } from "./readPrivateImage";
 // read CLI credentials or refresh before trying its static-token fallback.
 // This module is only wired through application/server (server-only).
 export class VercelBlobImageStorage implements ImageStorage, PrivateImageReader {
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
   private credentials() {
     const valid = (value: string | undefined): value is string => !!value && value.length <= 16000 && !/[^\x21-\x7e]/.test(value);
-    const { VERCEL_OIDC_TOKEN: oidcToken, BLOB_STORE_ID: storeId, BLOB_READ_WRITE_TOKEN: token } = process.env;
+    const { VERCEL_OIDC_TOKEN: oidcToken, BLOB_STORE_ID: storeId, BLOB_READ_WRITE_TOKEN: token } = this.env;
     const normalizedStore = storeId?.replace(/^store_/, "");
     if (valid(oidcToken) && storeId && normalizedStore && /^[A-Za-z0-9_-]{1,100}$/.test(normalizedStore)) return { oidcToken, storeId };
     if (valid(token)) return { token };
@@ -32,25 +33,48 @@ export class VercelBlobImageStorage implements ImageStorage, PrivateImageReader 
     return presignedUrl;
   }
 
-  async verifyUpload(upload: ImageUpload) {
+  // Internal generated-only operator setup. The dedicated process must disable
+  // the SDK's environment-controlled retries before this method is reachable.
+  // No ambient environment mutation, multipart fallback or returned-URL use.
+  async writeGeneratedFixture(upload: ImageUpload, bytes: Buffer, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const input = uploadInputSchema.parse({ filename: upload.filename, contentType: upload.contentType, size: upload.size });
+    if (process.env.VERCEL_BLOB_RETRIES !== "0" || input.filename !== "generated.png" || input.contentType !== "image/png" ||
+      bytes.length !== input.size || bytes.length > 1_048_576 || !matchesImageHeader(bytes, "image/png") ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(upload.id) ||
+      upload.pathname !== imagePathname(upload.id, input) || !(Date.parse(upload.expiresAt) > Date.now())) throw new ImageOperationError("Generated image setup is unavailable.");
+    await put(upload.pathname, bytes, { ...this.credentials(), access: "private", contentType: "image/png", addRandomSuffix: false,
+      allowOverwrite: false, multipart: false, maximumSizeInBytes: input.size, cacheControlMaxAge: 60,
+      abortSignal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
+    signal.throwIfAborted();
+  }
+
+  async verifyUpload(upload: ImageUpload, signal = AbortSignal.timeout(15_000)) {
+    signal.throwIfAborted();
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
     const credentials = this.credentials();
-    const metadata = await head(upload.pathname, { ...credentials, abortSignal: AbortSignal.timeout(15000) });
+    const metadata = await head(upload.pathname, { ...credentials, abortSignal: bounded });
+    bounded.throwIfAborted();
     if (metadata.pathname !== upload.pathname || metadata.size !== upload.size || metadata.contentType !== upload.contentType) {
       throw new ImageOperationError("Uploaded image does not match its declared type or size.");
     }
-    const result = await get(upload.pathname, { ...credentials, access: "private", useCache: false, abortSignal: AbortSignal.timeout(15000) });
+    const result = await get(upload.pathname, { ...credentials, access: "private", useCache: false, abortSignal: bounded });
+    bounded.throwIfAborted();
     if (!result || result.statusCode !== 200) throw new ImageOperationError("Uploaded image is unavailable.");
     const reader = result.stream.getReader();
+    const cancel = () => { void reader.cancel().catch(() => undefined); };
+    bounded.addEventListener("abort", cancel, { once: true });
     const header = new Uint8Array(12);
     let length = 0;
     try {
       while (length < header.length) {
         const { value, done } = await reader.read();
+        bounded.throwIfAborted();
         if (done) break;
         const part = value.subarray(0, header.length - length);
         header.set(part, length); length += part.length;
       }
-    } finally { await reader.cancel(); }
+    } finally { bounded.removeEventListener("abort", cancel); await reader.cancel(); reader.releaseLock(); }
     if (!matchesImageHeader(header.subarray(0, length), upload.contentType)) throw new ImageOperationError("The uploaded file is not a supported image.");
     return blobImageSourceSchema.parse({ kind: "vercel-blob", pathname: upload.pathname,
       originalFilename: upload.filename, contentType: metadata.contentType, size: metadata.size, uploadedAt: metadata.uploadedAt.toISOString() });

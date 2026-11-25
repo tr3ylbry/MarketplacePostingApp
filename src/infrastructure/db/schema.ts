@@ -4,6 +4,7 @@ import type { ReverbSelection } from "../../application/reverbRepository";
 import { users } from "./authSchema";
 export { users, sessions, accounts, verifications } from "./authSchema";
 export { ebayConnections, ebayOauthStates } from "./ebaySchema";
+export { localImageOperatorActivations } from "./localImageOperatorSchema";
 export { ebayMediaAttempts } from "./ebayMediaSchema";
 export { ebayRealMediaAttempts, ebayRealMediaReceipts, ebayRealMediaAssociations } from "./ebayRealMediaSchema";
 export { ebayInventoryResources, ebayInventoryAttempts, ebayInventoryEvidence } from "./ebayInventorySchema";

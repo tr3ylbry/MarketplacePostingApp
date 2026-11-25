@@ -22,13 +22,13 @@ export function assertVerificationDatabase(env: NodeJS.ProcessEnv, expected: str
 
 // Inspection only. Do not migrate, fill gaps, reset the journal, or accept an
 // extra row just because the most recent timestamp looks current.
-export async function assertVerificationJournal(db: NodePgDatabase<typeof schema>, expected: string) {
+export async function assertVerificationJournal(db: NodePgDatabase<typeof schema>, expected: string, sourceRoot = OPERATOR_ROOT) {
   try {
     const identity = await db.execute(sql`SELECT current_database() AS name`);
     if (identity.rows[0]?.name !== expected) throw Error();
-    const source = readMigrationFiles({ migrationsFolder: resolve(OPERATOR_ROOT,"drizzle") });
+    const source = readMigrationFiles({ migrationsFolder: resolve(sourceRoot,"drizzle") });
     const applied = await db.execute(sql`SELECT hash, created_at::text AS at FROM drizzle.__drizzle_migrations ORDER BY created_at, id`);
-    if (source.length !== 13 || applied.rows.length !== source.length || source.some((m,i) =>
+    if (source.length !== 14 || applied.rows.length !== source.length || source.some((m,i) =>
       applied.rows[i].hash !== m.hash || applied.rows[i].at !== String(m.folderMillis))) throw Error();
   } catch { throw new VerificationOperatorError("journal"); }
 }

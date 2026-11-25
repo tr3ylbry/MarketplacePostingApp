@@ -24,7 +24,7 @@ import { EbayTokenCipher } from "./tokenCipher";
 import { ebayConfig } from "./config";
 import { mediaRuntime } from "./mediaRuntime";
 import { admitRealMediaEvidence } from "./realMediaEvidence";
-import { runVerificationOperator } from "../../../scripts/image-verification-runtime";
+import { runVerificationOperator,runVerificationOperatorWithHeaders } from "../../../scripts/image-verification-runtime";
 import { runImageVerificationTool } from "../../../scripts/ebay-image-verification";
 import { verificationFixtureTitle } from "../../../scripts/image-verification-context";
 import type { VerificationPins,VerificationOptions } from "../../../scripts/image-verification-options";
@@ -212,4 +212,26 @@ it("refuses a mismatched actual disposable migration journal without initializin
  await isolated.pool.query("UPDATE drizzle.__drizzle_migrations SET hash=$1 WHERE id=$2",["0".repeat(64),row.id]);
  try{await expect(run()).rejects.toMatchObject({code:"journal"});expect(sdk.get).not.toHaveBeenCalled();expect(await parents()).toEqual([]);expect(wire.posts).toHaveLength(0);expect(wire.image.requests).toHaveLength(0);}
  finally{await isolated.pool.query("UPDATE drizzle.__drizzle_migrations SET hash=$1 WHERE id=$2",[row.hash,row.id]);}
+});
+
+it("uses genuine request headers through the same full diagnostic without cookie export or session mutation",async()=>{
+ const incoming=new Headers({cookie:"ui-preference=compact; "+cookie+"; other-state=synthetic",origin:"https://127.0.0.1:3000",host:"127.0.0.1:3000"});
+ const before=await connection(),session=await db.select().from(schema.sessions).where(eq(schema.sessions.id,sessionId));
+ const result=await runVerificationOperatorWithHeaders(options(),env,incoming,new AbortController().signal,()=>{},OPERATOR_ROOT);
+ expect(result).toMatchObject({exitCode:0,report:{operationSettled:true,accountingComplete:true,outcome:{retrieved:true,visual:{verdict:"match"},acknowledgement:"recorded"},associated:false}});
+ expect(incoming.get("cookie")).toContain(cookie);expect(incoming.get("origin")).toBe("https://127.0.0.1:3000");
+ expect(JSON.stringify(result)).not.toContain(cookie);expect(JSON.stringify(result)).not.toMatch(/opaque|image%41|synthetic-operator-access|pathname|ciphertext/);
+ expect(await connection()).toEqual(before);expect(await db.select().from(schema.sessions).where(eq(schema.sessions.id,sessionId))).toEqual(session);
+ expect(await db.select().from(schema.ebayOauthStates)).toEqual([]);expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);
+});
+it.each(["missing","tampered","foreign"])("refuses %s request authentication before source access or requests",async kind=>{
+ let value=kind==="missing"?"":cookie;
+ if(kind==="tampered")value=value.slice(0,-1)+(value.endsWith("x")?"y":"x");
+ if(kind==="foreign")value=(await(await auth.$context).test.login({userId:foreign})).headers.get("cookie")!;
+ await expect(runVerificationOperatorWithHeaders(options(),env,new Headers({cookie:value}),new AbortController().signal,()=>{},OPERATOR_ROOT)).rejects.toThrow();
+ expect(await parents()).toEqual([]);expect(sdk.get).not.toHaveBeenCalled();expect(wire.posts).toHaveLength(0);expect(wire.image.requests).toHaveLength(0);
+});
+it("uses the browser's supplied trusted source root for the journal rather than the bundled module location",async()=>{
+ await expect(runVerificationOperatorWithHeaders(options(),env,new Headers({cookie}),new AbortController().signal,()=>{},OPERATOR_ROOT+"/missing-source-root")).rejects.toMatchObject({code:"journal"});
+ expect(await parents()).toEqual([]);expect(sdk.get).not.toHaveBeenCalled();expect(wire.posts).toHaveLength(0);expect(wire.image.requests).toHaveLength(0);
 });

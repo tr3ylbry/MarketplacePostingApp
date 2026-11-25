@@ -18,6 +18,7 @@ let agent: MockAgent, original: ReturnType<typeof getGlobalDispatcher>;
 beforeEach(() => {
   original = getGlobalDispatcher(); agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
   vi.stubEnv("VERCEL_BLOB_API_URL", "https://blob.invalid.test");
+  vi.stubEnv("VERCEL_BLOB_RETRIES", "0");
   vi.stubEnv("BLOB_READ_WRITE_TOKEN", ""); vi.stubEnv("VERCEL_OIDC_TOKEN", ""); vi.stubEnv("BLOB_STORE_ID", "");
   vi.mocked(getVercelOidcToken).mockClear();
 });
@@ -75,7 +76,8 @@ const invalid = [
 it.each(invalid)("rejects incomplete or malformed credentials before any SDK/discovery call %#", async env => {
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   const operations = [() => storage.prepareUpload(upload), () => storage.verifyUpload(upload), () => storage.createReadAccess(pathname),
-    () => storage.signProviderReadAccess(pathname, Date.now() + 60000), () => storage.readPrivateImage(source, AbortSignal.timeout(1000)), () => storage.deleteObject(pathname)];
+    () => storage.signProviderReadAccess(pathname, Date.now() + 60000), () => storage.readPrivateImage(source, AbortSignal.timeout(1000)), () => storage.deleteObject(pathname),
+    () => storage.writeGeneratedFixture({ ...upload, filename: "generated.png", pathname: `images/${upload.id}/generated.png` }, bytes, AbortSignal.timeout(1000))];
   for (const operation of operations) await expect(operation()).rejects.toThrow("Private image storage is unavailable");
   expect(getVercelOidcToken).not.toHaveBeenCalled();
 });
@@ -126,4 +128,19 @@ it("keeps aborted/private-source and provider-expiry guards ahead of SDK access"
   await expect(storage.readPrivateImage({ ...source, pathname: "https://attacker.invalid/object" }, AbortSignal.timeout(1000))).rejects.toThrow();
   for (const expiry of [NaN, Date.now() - 1, Date.now() + 1800000]) await expect(storage.signProviderReadAccess(pathname, expiry)).rejects.toThrow();
   expect(getVercelOidcToken).not.toHaveBeenCalled();
+});
+it.each(["static", "oidc"])("performs a single private generated PUT with explicit %s credentials and no implicit discovery", async mode => {
+  const token = configure(mode), generatedPath = `images/${upload.id}/generated.png`, requests = vi.spyOn(agent, "dispatch");
+  agent.get("https://blob.invalid.test").intercept({ method: "PUT", path: "/?" + new URLSearchParams({ pathname: generatedPath }),
+    headers: { authorization: `Bearer ${token}`, "x-vercel-blob-access": "private", "x-add-random-suffix": "0", "x-allow-overwrite": "0", "x-content-type": "image/png" } })
+    .reply(200, { pathname: generatedPath, contentType: "image/png", url: "https://synthetic.private.blob.vercel-storage.com/ignored", downloadUrl: "https://synthetic.private.blob.vercel-storage.com/ignored", contentDisposition: "inline", etag: "synthetic" });
+  await storage.writeGeneratedFixture({ ...upload, filename: "generated.png", pathname: generatedPath }, bytes, AbortSignal.timeout(1000));
+  expect(requests).toHaveBeenCalledOnce(); expect(getVercelOidcToken).not.toHaveBeenCalled(); agent.assertNoPendingInterceptors();
+});
+it("does not retry or fall back after an uncertain generated PUT failure", async () => {
+  configure("static"); const generatedPath = `images/${upload.id}/generated.png`, requests = vi.spyOn(agent, "dispatch");
+  agent.get("https://blob.invalid.test").intercept({ method: "PUT", path: "/?" + new URLSearchParams({ pathname: generatedPath }) })
+    .reply(503, { error: { code: "service_unavailable", message: "Synthetic uncertainty" } });
+  await expect(storage.writeGeneratedFixture({ ...upload, filename: "generated.png", pathname: generatedPath }, bytes, AbortSignal.timeout(1000))).rejects.toThrow();
+  expect(requests).toHaveBeenCalledOnce(); expect(getVercelOidcToken).not.toHaveBeenCalled(); agent.assertNoPendingInterceptors();
 });

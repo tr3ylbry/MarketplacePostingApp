@@ -3,6 +3,7 @@ import { and, eq, isNotNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "../src/infrastructure/db/schema";
 import { openLocalDatabasePool, openLocalSessionReader } from "./local-session";
+import { OPERATOR_ROOT } from "./reviewed-checkout";
 import type { VerificationOptions } from "./image-verification-options";
 import { assertVerificationDatabase, assertVerificationJournal, VerificationOperatorError, verificationFixtureTitle } from "./image-verification-context";
 import { queueVerificationFixtureCleanup } from "./image-verification-cleanup";
@@ -24,20 +25,37 @@ import { DrizzleMediaCaptureRepository } from "../src/infrastructure/repositorie
 import type { RealMediaSnapshot } from "../src/application/ebayRealMedia";
 
 type OperationalOptions = Extract<VerificationOptions,{pins:unknown}>;
+type SessionInput = { kind: "manual"; cookie: string } | { kind: "request"; headers: Headers };
+
+// Preserve the existing CLI entry point and exact-cookie contract.
 export async function runVerificationOperator(options: OperationalOptions, env: NodeJS.ProcessEnv, cookie: string,
   signal: AbortSignal, stillReviewed: () => void) {
+  return runAuthenticatedVerificationOperator(options,env,{kind:"manual",cookie},signal,stillReviewed,OPERATOR_ROOT);
+}
+
+// Only a trusted server request boundary supplies headers and sourceRoot. This
+// exports no cookie/authentication bridge and accepts no asserted actor DTO.
+export async function runVerificationOperatorWithHeaders(options: OperationalOptions, env: NodeJS.ProcessEnv, requestHeaders: Headers,
+  signal: AbortSignal, stillReviewed: () => void, sourceRoot = OPERATOR_ROOT) {
+  const ownedHeaders=new Headers(requestHeaders);
+  try { return await runAuthenticatedVerificationOperator(options,env,{kind:"request",headers:ownedHeaders},signal,stillReviewed,sourceRoot); }
+  finally { ownedHeaders.delete("cookie"); }
+}
+
+async function runAuthenticatedVerificationOperator(options: OperationalOptions, env: NodeJS.ProcessEnv, input: SessionInput,
+  signal: AbortSignal, stillReviewed: () => void, sourceRoot: string) {
   const p = options.pins;
   const cancelled = new AbortController(); signal=AbortSignal.any([signal,cancelled.signal]);
   assertVerificationDatabase(env,p.database); stillReviewed(); signal.throwIfAborted();
   const reader = openLocalSessionReader(env,true);
   let pool: ReturnType<typeof openLocalDatabasePool> | undefined, operation: DiagnosticImageOperation | undefined;
   try {
-    const actor = await reader.session(cookie);
+    const actor = await (input.kind === "manual" ? reader.session(input.cookie) : reader.sessionFromHeaders(input.headers));
     if (!actor) throw new VerificationOperatorError("context");
     pool = openLocalDatabasePool(env,"execution",true);
     const onError = () => { cancelled.abort(); operation?.cancel(); }; pool.on("error",onError);
     const db = drizzle(pool,{schema});
-    await assertVerificationJournal(db,p.database); signal.throwIfAborted(); stillReviewed();
+    await assertVerificationJournal(db,p.database,sourceRoot); signal.throwIfAborted(); stillReviewed();
     if (options.mode === "cleanup-fixture") {
       const cleanup = await queueVerificationFixtureCleanup(db,actor,p,signal);
       return { exitCode:0, report:{ version:"diagnostic-operator-v1",mode:"cleanup-fixture",cleanup,associated:false,providerRequests:0 } };
@@ -84,7 +102,7 @@ export async function runVerificationOperator(options: OperationalOptions, env: 
     }
     const repository = new ObservedMedia(db), verification = new ObservedVerification(db), evidence = new DrizzleMediaCaptureRepository(db);
     const derivative = createPhotoDerivativeService(listings,new DrizzleImageRepository(db),connections,captureSource(env),photoTransformer,config.fingerprint);
-    const workflow = createDiagnosticImageWorkflow({ auth:reader.api,headers:()=>reader.headers(cookie),repository,verification,evidence,
+    const workflow = createDiagnosticImageWorkflow({ auth:reader.api,headers:()=>input.kind === "manual" ? reader.headers(input.cookie) : reader.headersFromRequest(input.headers),repository,verification,evidence,
       configHash:()=>config.fingerprint,recipe:()=>PHOTO_RECIPE,
       async derive(...args) {
         const photo = await derivative.derive(...args);
@@ -136,7 +154,7 @@ export async function runVerificationOperator(options: OperationalOptions, env: 
     throw new VerificationOperatorError("unavailable");
   } finally {
     if (operation) { operation.cancel(); await operation.settled; }
-    cookie="";
+    if (input.kind === "manual") input.cookie=""; else input.headers.delete("cookie");
     try { await pool?.end(); } finally { await reader.close(); }
   }
 }

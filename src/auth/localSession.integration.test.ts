@@ -117,3 +117,62 @@ it.each(["cancel", "eof", "error"])("leaves all records intact on input %s", asy
 it.each([["--check-session", "--approve-media-consent"], ["--check-session", "--approve-one-create"], ["--check-session", "--fixture", "/tmp/no-file"]].map(args => ({ args })))("cannot fall through conflicting flags to a real mode: $args", async ({ args }) => {
   const r = await check(cookie, args); expect(r.exit).toBe(1); expect(r.output).toContain('"failure":"flags"');
 });
+
+async function checkRequestHeaders(requestHeaders: Headers, settings = env) {
+  const before = await snapshot(), original = [...requestHeaders.entries()];
+  const reader = openLocalSessionReader(settings, true);
+  try {
+    const actor = await reader.sessionFromHeaders(requestHeaders);
+    expect([...requestHeaders.entries()]).toEqual(original);
+    expect(await snapshot()).toEqual(before);
+    return actor;
+  } finally { await reader.close(); }
+}
+
+it("authenticates ordinary server Headers without a TTY or exact-cookie export and leaves them unchanged", async () => {
+  const incoming = new Headers({ cookie: "ui-preference=compact; " + cookie + "; other-state=synthetic",
+    origin: LOCAL_ORIGIN, host: "127.0.0.1:3000" });
+  const actor = await checkRequestHeaders(incoming);
+  expect(actor).toEqual({ ownerId: owner, id: sessionId, expiresAt: expect.any(String) });
+  expect(Object.keys(actor!).sort()).toEqual(["expiresAt", "id", "ownerId"]);
+});
+
+it("clones server Headers only after checking its read-only pool and never mutates the request", async () => {
+  const incoming = new Headers({ cookie, origin: LOCAL_ORIGIN });
+  const reader = openLocalSessionReader(env, true);
+  try {
+    const clone = await reader.headersFromRequest(incoming);
+    expect(clone).not.toBe(incoming);
+    expect(clone.get("cookie")).toBe(cookie);
+    clone.delete("cookie");
+    expect(incoming.get("cookie")).toBe(cookie);
+    expect((await reader.sessionFromHeaders(incoming))?.ownerId).toBe(owner);
+  } finally { await reader.close(); }
+});
+
+it("does not renew old live sessions when authenticated through normal request Headers", async () => {
+  await isolated.db.update(schema.sessions).set({ createdAt: new Date(Date.now() - 6 * 86400000), updatedAt: new Date(Date.now() - 6 * 86400000),
+    expiresAt: new Date(Date.now() + 3600000) }).where(eq(schema.sessions.id, sessionId));
+  expect((await checkRequestHeaders(new Headers({ cookie })))?.id).toBe(sessionId);
+});
+
+it("rejects expired signed browser sessions without deleting rows or emitting replacement cookies", async () => {
+  await isolated.db.update(schema.sessions).set({ expiresAt: new Date(0) }).where(eq(schema.sessions.id, sessionId));
+  expect(await checkRequestHeaders(new Headers({ cookie }))).toBeNull();
+  expect(await isolated.db.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId))).toHaveLength(1);
+});
+
+it("rejects revoked and tampered browser sessions without changing any application state", async () => {
+  const dot = cookie.indexOf(".", cookie.indexOf("="));
+  const changed = cookie.slice(0, dot + 1) + (cookie[dot + 1] === "x" ? "y" : "x") + cookie.slice(dot + 2);
+  expect(await checkRequestHeaders(new Headers({ cookie: changed }))).toBeNull();
+  await isolated.db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId));
+  expect(await checkRequestHeaders(new Headers({ cookie }))).toBeNull();
+});
+
+it.each(["", "malformed", "insecure-alias", "asserted-owner"])("does not authenticate %s request headers", async kind => {
+  const incoming = kind === "insecure-alias" ? new Headers({ cookie: cookie.replace("__Secure-", "") }) :
+    kind === "asserted-owner" ? new Headers({ "x-owner-id": owner, "x-session-id": sessionId, authorization: "Bearer synthetic" }) :
+    new Headers(kind ? { cookie: kind } : {});
+  expect(await checkRequestHeaders(incoming)).toBeNull();
+});

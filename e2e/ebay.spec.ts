@@ -14,6 +14,15 @@ test.afterEach(async()=>{
   await(await auth.$context).test.deleteUser(owner);
 });
 test.afterAll(()=>pool.end());
+test("diagnostic browser routes stay disabled in ordinary isolated application mode",async({page,request})=>{
+  const stats=async()=>await(await request.get("http://127.0.0.1:4313/stats",{headers:{"x-test-secret":process.env.TEST_EBAY_SECRET!}})).json();
+  const before=await stats();
+  expect((await request.get("/api/operator/ebay-image-verification")).status()).toBe(404);
+  expect((await request.post("/api/operator/ebay-image-verification",{data:{action:"run",revision:0,confirmed:true}})).status()).toBe(404);
+  expect((await page.goto("/operator/ebay-image-verification"))?.status()).toBe(404);
+  expect(await stats()).toEqual(before);
+  await expect(page.getByRole("button",{name:/consent|diagnostic|fixture/i})).toHaveCount(0);
+});
 test("explicit fake OAuth connection, reload, refresh, disconnect and browser privacy; passive navigation calls no provider",async({page,context,request})=>{
   const stats=async()=>await(await request.get("http://127.0.0.1:4313/stats",{headers:{"x-test-secret":process.env.TEST_EBAY_SECRET!}})).json() as {exchanges:number;refreshes:number;identities:number};
   const before=await stats();await page.goto("/settings/integrations/ebay");await expect(page.getByText("Not connected",{exact:true})).toBeVisible();await page.reload();expect(await stats()).toEqual(before);
