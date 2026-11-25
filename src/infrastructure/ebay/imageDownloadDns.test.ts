@@ -39,3 +39,57 @@ it("supports a bounded complete CNAME chain and refuses its incomplete form",()=
   const r=parseImageDnsAnswer(Buffer.concat([q,cname,name,name,address]),id,1);expect(r.canonical).toBe("alias.invalid");expect(r.addresses[0].address).toBe("1.1.1.1");
   q.writeUInt16BE(1,6);expect(()=>parseImageDnsAnswer(Buffer.concat([q,cname,name]),id,1)).toThrow();
 });
+
+function dnsName(value:string){return Buffer.concat([...value.split(".").map(label=>Buffer.concat([Buffer.from([label.length]),Buffer.from(label)])),Buffer.from([0])]);}
+function dnsRecord(owner:Buffer,type:number,data:Buffer,klass=1){
+  const header=Buffer.alloc(10);header.writeUInt16BE(type);header.writeUInt16BE(klass,2);header.writeUInt32BE(60,4);header.writeUInt16BE(data.length,8);
+  return Buffer.concat([owner,header,data]);
+}
+function negativeAlias(type:1|28,code=0,zone="invalid.test",authorityType=6,soaClass=1){
+  const q=Buffer.from(imageDnsQuestion(id,type).subarray(2));q.writeUInt16BE(0x8180|code,2);q.writeUInt16BE(1,6);q.writeUInt16BE(1,8);
+  const target=dnsName("alias.invalid.test"),times=Buffer.alloc(20);[1,3600,600,86400,60].forEach((n,i)=>times.writeUInt32BE(n,i*4));
+  const rdata=authorityType===6?Buffer.concat([dnsName("ns.invalid.test"),dnsName("hostmaster.invalid.test"),times]):dnsName("ns.invalid.test");
+  return Buffer.concat([q,dnsRecord(Buffer.from([0xc0,0x0c]),5,target),dnsRecord(dnsName(zone),authorityType,rdata,soaClass)]);
+}
+it.each([1,28] as const)("accepts terminal SOA-backed CNAME NODATA type%i without another lookup",type=>{
+  const result=parseImageDnsAnswer(negativeAlias(type),id,type);expect(result).toEqual({code:0,canonical:"alias.invalid.test",addresses:[]});
+});
+it("accepts terminal SOA-backed CNAME NXDOMAIN without claiming addresses",()=>{
+  expect(parseImageDnsAnswer(negativeAlias(28,3),id,28)).toEqual({code:3,canonical:"alias.invalid.test",addresses:[]});
+});
+it("keeps NS-only alias referrals refused",()=>{expect(()=>parseImageDnsAnswer(negativeAlias(28,0,"invalid.test",2),id,28)).toThrow();});
+it("does not mistake a direct NS-only referral for completed NODATA",()=>{
+  const q=Buffer.from(imageDnsQuestion(id,28).subarray(2));q.writeUInt16BE(0x8180,2);q.writeUInt16BE(1,8);
+  const referral=Buffer.concat([q,dnsRecord(dnsName("sandbox.ebayimg.com"),2,dnsName("ns.invalid.test"))]);
+  expect(()=>parseImageDnsAnswer(referral,id,28)).toThrow();
+});
+it("accepts a direct valid SOA-backed negative even with NS authority",()=>{
+  const q=Buffer.from(imageDnsQuestion(id,28).subarray(2));q.writeUInt16BE(0x8180,2);q.writeUInt16BE(2,8);
+  const soa=Buffer.concat([dnsName("ns.invalid.test"),dnsName("hostmaster.invalid.test"),Buffer.alloc(20)]);
+  const response=Buffer.concat([q,dnsRecord(dnsName("sandbox.ebayimg.com"),6,soa),dnsRecord(dnsName("sandbox.ebayimg.com"),2,dnsName("ns.invalid.test"))]);
+  expect(parseImageDnsAnswer(response,id,28)).toEqual({code:0,canonical:"i.sandbox.ebayimg.com",addresses:[]});
+});
+it("refuses an unrelated or wrong-class negative SOA",()=>{
+  expect(()=>parseImageDnsAnswer(negativeAlias(28,0,"elsewhere.test"),id,28)).toThrow();
+  expect(()=>parseImageDnsAnswer(negativeAlias(28,0,"valid.test"),id,28)).toThrow();
+  expect(()=>parseImageDnsAnswer(negativeAlias(28,0,"invalid.test",6,3),id,28)).toThrow();
+});
+it("requires a single semantically framed SOA in authority, not additional data",()=>{
+  const qend=imageDnsQuestion(id,28).length-2,cnameSize=dnsRecord(Buffer.from([0xc0,0x0c]),5,dnsName("alias.invalid.test")).length;
+  const soaAt=qend+cnameSize,headerAt=soaAt+dnsName("invalid.test").length;
+  const short=negativeAlias(28);short.writeUInt16BE(short.readUInt16BE(headerAt+8)-1,headerAt+8);
+  expect(()=>parseImageDnsAnswer(short.subarray(0,-1),id,28)).toThrow();
+  const duplicate=negativeAlias(28);duplicate.writeUInt16BE(2,8);
+  expect(()=>parseImageDnsAnswer(Buffer.concat([duplicate,duplicate.subarray(soaAt)]),id,28)).toThrow();
+  const additional=negativeAlias(28);additional.writeUInt16BE(0,8);additional.writeUInt16BE(1,10);
+  expect(()=>parseImageDnsAnswer(additional,id,28)).toThrow();
+});
+it("treats SOA mailbox labels as bounded opaque framing without broadening CNAME labels",()=>{
+  const q=Buffer.from(imageDnsQuestion(id,28).subarray(2));q.writeUInt16BE(0x8180,2);q.writeUInt16BE(1,6);q.writeUInt16BE(1,8);
+  const mailbox=Buffer.concat([Buffer.from([9]),Buffer.from("host.name"),dnsName("invalid.test")]);
+  const soa=Buffer.concat([dnsName("ns.invalid.test"),mailbox,Buffer.alloc(20)]);
+  const packet=Buffer.concat([q,dnsRecord(Buffer.from([0xc0,0x0c]),5,dnsName("alias.invalid.test")),dnsRecord(dnsName("invalid.test"),6,soa)]);
+  expect(parseImageDnsAnswer(packet,id,28).addresses).toEqual([]);
+  const invalidCname=Buffer.concat([Buffer.from([9]),Buffer.from("host.name"),dnsName("invalid.test")]);
+  expect(()=>parseImageDnsAnswer(Buffer.concat([q,dnsRecord(Buffer.from([0xc0,0x0c]),5,invalidCname),dnsRecord(dnsName("invalid.test"),6,soa)]),id,28)).toThrow();
+});

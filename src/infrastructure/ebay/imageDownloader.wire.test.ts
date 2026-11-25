@@ -3,7 +3,7 @@ import net from "node:net";
 import dns from "node:dns";
 import tls from "node:tls";
 import fs from "node:fs";
-import { localImageDns, localImageTls, dnsFixtureResponse, imageWireResponse, DOWNLOAD_TEST_CA, DOWNLOAD_TEST_HOST } from "../../test/imageDownloaderFixtures";
+import { localImageDns, localImageTls, dnsFixtureResponse, dnsAliasFixtureResponse, imageWireResponse, DOWNLOAD_TEST_CA, DOWNLOAD_TEST_HOST } from "../../test/imageDownloaderFixtures";
 import { startImageDownload, type ImageDownloadInput } from "./imageDownloader";
 import { inspectImageAddressSet } from "./imageAddressSetPolicy";
 import { acquirePhotoCapacity, releasePhotoCapacity } from "../../application/photoCapacity";
@@ -73,6 +73,13 @@ it("performs real local DNS/TLS/HTTP, preserves the exact target and sends only 
   const request=web.requests[0].toString("ascii");
   expect(request).toBe(`GET /synthetic/image%41.png?opaque=A%2fb+Q&x=&x=2 HTTP/1.1\r\nHost: ${DOWNLOAD_TEST_HOST}\r\nAccept: image/png, image/jpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n`);
   expect(JSON.stringify(r.diagnostic)).not.toMatch(/opaque|synthetic|127\.|https|cookie|token|image%41/i);
+});
+it("retrieves after a positive alias A plus terminal SOA-backed alias AAAA NODATA",async()=>{
+  await servers(undefined,false,(question,socket)=>socket.write(dnsAliasFixtureResponse(question)));
+  const op=start(),result=await op.result;await op.settled;
+  expect(result.diagnostic).toMatchObject({outcome:"retrieved",settlement:"settled",bytes:4});
+  expect(result.diagnostic).not.toHaveProperty("dns");expect(dnsServer.connections).toBe(1);expect(dnsServer.questions).toHaveLength(2);
+  expect(tls.connect).toHaveBeenCalledOnce();expect(web.requests).toHaveLength(1);result.data?.fill(0);
 });
 it.each([
   ["redirect","HTTP/1.1 302 Found\r\nLocation: https://refused.invalid/\r\nContent-Length: 0\r\n\r\n"],

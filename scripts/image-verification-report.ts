@@ -1,12 +1,18 @@
 import { z } from "zod";
 import { IMAGE_COMPARISON_RECIPE } from "../src/infrastructure/storage/diagnosticImageDecode";
 import type { DiagnosticImageResult } from "../src/infrastructure/ebay/diagnosticImageWorkflow";
+import { DNS_DIAGNOSTIC_PHASES, DNS_DIAGNOSTIC_REASONS, DNS_NATIVE_CODES } from "../src/infrastructure/ebay/imageDownloadDiagnostics";
 
 const check = z.enum(["not-run", "passed", "failed"]), settlement = z.enum(["settled", "unsettled"]);
+const dns = z.strictObject({ phase: z.enum(DNS_DIAGNOSTIC_PHASES), reason: z.enum(DNS_DIAGNOSTIC_REASONS), nativeCode: z.enum(DNS_NATIVE_CODES).nullable() });
 const diagnostic = z.strictObject({
   outcome: z.enum(["retrieved", "refused"]), reason: z.enum(["retrieved", "policy", "context", "clock", "deadline", "cancelled", "busy", "dns", "address", "tls", "peer", "headers", "body", "status", "transport"]),
   bytes: z.number().int().min(0).max(1_048_576), mime: z.enum(["image/png", "image/jpeg"]).nullable(),
-  exceeded: z.boolean(), unverified: z.literal(true), associated: z.literal(false), settlement,
+  exceeded: z.boolean(), unverified: z.literal(true), associated: z.literal(false), settlement, dns: dns.optional(),
+}).superRefine((value, ctx) => {
+  if (value.dns && (!["dns", "deadline", "cancelled"].includes(value.reason) || value.dns.nativeCode !== null && value.dns.reason !== "native-error")) {
+    ctx.addIssue({ code: "custom", message: "Invalid DNS diagnostic category." });
+  }
 });
 const margin = z.number().min(0).max(128), delta = z.number().min(0).max(255);
 const visual = z.strictObject({

@@ -6,6 +6,7 @@ import { resolveImageDownloadAddresses } from "./imageDownloadDns";
 import { connectImagePeer, prepareImageHttp, type ImageHttpBody } from "./imageDownloadTransport";
 import { IMAGE_DOWNLOAD_POLICY_CUTOFF, ImageDownloadRefusal, imageRequestTarget, type DownloadReason } from "./imageDownloadPolicy";
 import { downloadDeferred, type ImageDownloadWork } from "./imageDownloadWork";
+import { ImageDnsRefusal, imageDnsDiagnostic, type ImageDnsDiagnostic } from "./imageDownloadDiagnostics";
 
 // Internal primitive only. These numbers/callback do NOT authenticate an owner,
 // bind a genuine response, consume a durable action or create network authority.
@@ -20,12 +21,13 @@ export interface ImageDownloadDiagnostic {
   outcome: "retrieved" | "refused"; reason: DownloadReason; bytes: number;
   mime: "image/png" | "image/jpeg" | null; exceeded: boolean; unverified: true; associated: false;
   settlement: "settled" | "unsettled";
+  dns?: Readonly<ImageDnsDiagnostic>;
 }
 export interface ImageDownloadResult { diagnostic: Readonly<ImageDownloadDiagnostic>; data: Uint8Array | null }
 export interface ImageDownloadOperation { result: Promise<ImageDownloadResult>; settled: Promise<void>; cancel(): void }
-const diagnostic = (reason: DownloadReason, settled: boolean, body?: ImageHttpBody, progress?: {bytes: number; exceeded: boolean; mime: "image/png" | "image/jpeg" | null}): ImageDownloadResult => Object.freeze({
+const diagnostic = (reason: DownloadReason, settled: boolean, body?: ImageHttpBody, progress?: {bytes: number; exceeded: boolean; mime: "image/png" | "image/jpeg" | null}, dns?: Readonly<ImageDnsDiagnostic>): ImageDownloadResult => Object.freeze({
   diagnostic: Object.freeze({ outcome: body ? "retrieved" : "refused", reason, bytes: body?.data.byteLength ?? progress?.bytes ?? 0, mime: body?.mime ?? progress?.mime ?? null, exceeded: progress?.exceeded ?? false,
-    unverified: true, associated: false, settlement: settled ? "settled" : "unsettled" }), data: body?.data ?? null,
+    unverified: true, associated: false, settlement: settled ? "settled" : "unsettled", ...(dns ? { dns } : {}) }), data: body?.data ?? null,
 });
 function validated(input: ImageDownloadInput, now: number) {
   if (!input || Object.keys(input).sort().join(",") !== "beforeRequest,deadlines,providerExpiresAt,responseReceivedAt,url" || typeof input.beforeRequest !== "function") throw new ImageDownloadRefusal("context");
@@ -50,14 +52,19 @@ function downloadClock() {
 export function startImageDownload(input: ImageDownloadInput, signal?: AbortSignal, parentCapacity?: PhotoCapacity): ImageDownloadOperation {
   const result = downloadDeferred<ImageDownloadResult>(), settled = downloadDeferred<void>();
   let reason: DownloadReason | null = null, finished = false, allSettled = false;
+  let resolving = false, dnsDetail: Readonly<ImageDnsDiagnostic> | undefined;
   const resources: Array<ImageDownloadWork<unknown>> = [], waits: Promise<unknown>[] = [];
   let progress: (() => {bytes: number; exceeded: boolean; mime: "image/png" | "image/jpeg" | null}) | undefined;
   const controller = new AbortController();
-  const stop = (value: DownloadReason) => {
+  const stop = (value: DownloadReason, detail?: Readonly<ImageDnsDiagnostic>) => {
     if (finished) return;
+    dnsDetail ??= detail;
     reason ??= value; controller.abort();
+    if (!dnsDetail && resolving && (reason === "deadline" || reason === "cancelled")) {
+      dnsDetail = imageDnsDiagnostic("resolution", reason === "deadline" ? "deadline" : "aborted");
+    }
     for (const resource of resources) { try { resource.abort(); } catch { /* settlement still owns capacity */ } }
-    result.resolve(diagnostic(reason, allSettled || waits.length === 0, undefined, progress?.()));
+    result.resolve(diagnostic(reason, allSettled || waits.length === 0, undefined, progress?.(), dnsDetail));
   };
   const operation: ImageDownloadOperation = { result: result.promise, settled: settled.promise, cancel: () => stop("cancelled") };
   let capacity: ReturnType<typeof acquirePhotoCapacity> | undefined, finishCapacity: (() => void) | undefined;
@@ -86,8 +93,9 @@ export function startImageDownload(input: ImageDownloadInput, signal?: AbortSign
         if (reason) resource.abort(); return resource;
       };
       check();
+      resolving = true;
       const dns = track(resolveImageDownloadAddresses()), answers = await dns.ready;
-      await dns.settled; check();
+      await dns.settled; resolving = false; check();
       const candidate = inspectImageAddressSet(answers, Date.now()).candidate;
       if (!candidate) throw new ImageDownloadRefusal("address");
       check(); const peer = track(connectImagePeer(candidate)), socket = await peer.ready; check();
@@ -105,7 +113,7 @@ export function startImageDownload(input: ImageDownloadInput, signal?: AbortSign
       allSettled = true; finished = true; result.resolve(diagnostic("retrieved", true, body)); body = undefined;
     } catch (error) {
       const failure = error instanceof ImageDownloadRefusal ? error.reason : error instanceof PhotoDerivativeError && error.code === "busy" ? "busy" : "transport";
-      stop(failure);
+      stop(failure, error instanceof ImageDnsRefusal ? error.dns : undefined);
     } finally {
       if (!finished) for (const resource of resources) { try { resource.abort(); } catch { /* wait below */ } }
       body?.data.fill(0);
