@@ -1,0 +1,46 @@
+# Local browser image diagnostic
+
+This opt-in local operator replaces the cookie-copy procedure for a **separately approved** diagnostic. Ordinary application requests carry the existing Secure/HttpOnly/SameSite=Lax Better Auth cookie. The assistant never reads, exports or pastes it. The manual tools remain available; their handoff rules still apply when explicitly chosen.
+
+Implementation, a merge, a launcher flag or synthetic evidence does not authorize a live experiment. The original capture and later DNS-refused diagnostic remain unknown/unassociated, permanently fenced, with their historical budgets exhausted. Normal EPS transport, usable-media admission and Inventory writes remain disabled.
+
+## Activation and source
+
+After exact-commit approval and fresh local prerequisites, the trusted Node24 launcher is:
+
+```bash
+node --conditions=react-server --import tsx scripts/local-image-operator.ts \
+  --reviewed-head APPROVED_MERGE_SHA --reviewed-tree APPROVED_TREE_SHA \
+  --approve-four-requests
+```
+
+The private execution package supplies actual reviewed values. Do not run this template as an experiment or restart it after uncertainty. The launcher verifies its executing root, clean tracked Git tree, exact SHA/tree, required committed modules and absence of ignored/untracked source shadows. The original root workspace file is allowed. It loads existing local configuration only after that source check, verifies the exact local database/journal, and privately selects the sole existing connected Sandbox seller. Multiple candidates or a changed seller/configuration stop setup.
+
+The launcher creates one durable activation and starts the existing trusted HTTPS workflow on **127.0.0.1:3000 only**. It neither installs certificates nor changes authentication, trust or credentials. The dedicated process sets the supported Blob SDK retry control to zero. Unsafe preloads/proxies, production/Vercel/test-build mode, a changed origin or a different source tree disable the operator. Every request repeats the source check; a browser cannot submit another root/head/owner/seller/target.
+
+Migration **0013_local_image_operator.sql** adds one local activation ledger and transition guards. It must be separately authorized for the intended development database before launch; this implementation's migrations/tests use disposable databases only. All **14** source hashes/timestamps (0000–0013) must match the journal, with no additional or missing entry. The operator never applies, repairs or resets migrations.
+
+## Browser procedure
+
+Open `https://127.0.0.1:3000/operator/ebay-image-verification` in the normally authenticated browser. Outside a valid activation the API/page are unavailable. The owner handles login, security challenges and any owner-only consent interaction. No DevTools, clipboard, cookie export, session bridge or new authentication endpoint is involved.
+
+1. Confirm the one replacement consent. The browser receives only the standard one-shot Sandbox authorization URL, then navigates normally. Exactly base `api_scope` plus `sell.inventory` is requested. This replaces readiness permissions; it does not enable application marketplace writes.
+2. The callback validates exact route/origin/host, genuine signed read-only session, original owner/session and durable state. Exchange and GetUser slots are each consumed **before** their request. Wrong seller, denied/failed/expired consent or uncertain acknowledgement cannot replace the prior encrypted credential values. HEAD/foreign/malformed callback previews do not consume or stop an activation. A recognized operator state cannot fall through to ordinary authorization when its launcher is missing.
+3. Confirm preparation of one generated private fixture. The server generates one fresh non-personal RGB500×600 PNG (no alpha/identifying metadata), verifies the frozen derivative and pins both digests before creating its prebound disposable listing. Normal owner-scoped reservation/verification/finalization and explicit private Blob credentials are reused. A fresh post-lock authorization occurs after blocking setup and between storage awaits, immediately before the one private write and finalization. No retry, overwrite, multipart fallback or replacement content is attempted after uncertainty. The SDK is configured for one write try.
+4. Confirm the diagnostic once. The SQL run marker commits before asynchronous work begins. The same reviewed workflow validates exact seller/grant/config/session/listing/image/content/recipe, retention, access/refresh lifetime and final post-lock authorization. At least the two-minute access reserve plus its30-second operation budget is required before confirmation. No refresh client is available. The existing one-POST/one-anonymous-primary-GET limits, pinned egress/TLS, byte/time/decode/comparison limits, permanent fences and settlement-owned capacity remain in force.
+5. Read the bounded status/report. Passive status does not query providers or create content. Cancel aborts the actual owning task; it does not mean underlying work settled. A missing process after restart is **unknown**, never retry permission. Stop source changes/restarts; do not launch another activation to bypass consumption.
+6. After actual settlement and the persisted retention deadline, confirm guarded local cleanup. A genuine fresh session for the same owner may authorize only this cleanup; it grants no resumed network authority. The normal exact-fenced fixture cleanup removes the disposable local listing/photo and queues its private object. Physical Blob cleanup requires the separate whole-queue/exclusive-window proof; this page never invokes the global worker. Remote erasure is unproven.
+
+Each browser POST contains only `action`, current `revision` and explicit `confirmed:true`. Exact HTTPS origin/Host/forwarded headers, same-origin fetch and bounded strict JSON protect mutations; genuine server-side Better Auth determines the actor. The read-only session pool enforces no renewal/replacement cookie or session-record mutation. Revision CAS and SQL wall-clock checks after ordered locks enforce one-use authority independently of UI state.
+
+## Accounting, retention and limitations
+
+The total future budget remains **one exchange, one GetUser, one image POST, one anonymous primary-image GET**. Failed/uncertain committed intents consume slots; unused slots cannot be reassigned. There is no refresh, retry, second consent, redirect, HEAD, getImage, alternative address/URL, maximum-image fallback or Production path. Blob setup/guarded cleanup are separately approved operations, not concealed eBay slots.
+
+The activation retains only minimum private bindings, immutable consumption/status/deadline markers and owner-scoped links. It stores no cookies, tokens, codes, URLs, raw errors, image bytes or verbose diagnostics. Day30 review and Day90 disposition are recorded obligations; there is no purge, renewal, automatic release or history erasure. Existing media ledgers/fences remain the authoritative send history. Operator/action deletion and owner cascading erasure are refused; required erasure needs the existing disposition/mutation-disablement safeguards.
+
+The bounded visual report stays in operation-local memory and may be lost on restart. Losing it does not erase SQL consumption or prove settlement. Status then discloses unknown accounting rather than fabricating success. This is a single-process local operator, not a serverless/distributed job system. HMR uses the same process registry; a new process cannot adopt an unsettled task.
+
+**Pre-send/pre-fence failures remain retained for separate guarded recovery.** This operator deliberately cannot delete a partially prepared fixture or manufacture a POST fence to satisfy cleanup. Likewise, an uncertain local cleanup acknowledgement cannot be retried through another path. Record the limitation and seek a concrete separately approved recovery procedure. No operator flag releases fences or creates remote ownership/admission.
+
+Testing uses signed synthetic sessions, uniquely disposable databases, generated bytes, blocked SDK/network mocks and the existing fake-provider workflow. Production/test-build HTTP checks prove the entry stays disabled without activation. Those tests do not establish a successful live browser consent/download/comparison; a new exact-commit acceptance package and owner approval remain mandatory.

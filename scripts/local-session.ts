@@ -49,31 +49,42 @@ export function openLocalSessionReader(env: NodeJS.ProcessEnv, bounded = false) 
   try {
     const options = authOptions(drizzle(pool, { schema }), env);
     const auth = betterAuth({ ...options, session: { ...options.session, deferSessionRefresh: true } });
-    async function headers(cookie: string) {
-      const validated = localSessionCookie(cookie);
+    async function requestHeaders(input: Headers) {
       if (unavailable || (await pool.query("SHOW transaction_read_only")).rows[0]?.transaction_read_only !== "on") throw new LocalSessionError("unavailable");
-      return new Headers({ cookie: validated });
+      return new Headers(input);
+    }
+    async function headers(cookie: string) {
+      return requestHeaders(new Headers({ cookie: localSessionCookie(cookie) }));
+    }
+    async function sessionFromHeaders(input: Headers) {
+      try {
+        // Browser callers pass ordinary server request Headers. Origin/CSRF
+        // authorization belongs at that request boundary; these headers never
+        // choose the fixed configured auth origin or assert an owner/session.
+        const validatedHeaders = await requestHeaders(input);
+        // disableRefresh alone still deletes expired rows. Supported GET +
+        // deferSessionRefresh avoids that deletion; DB read-only is a backstop.
+        const result = await auth.api.getSession({ method: "GET", headers: validatedHeaders,
+          query: { disableRefresh: true, disableCookieCache: true }, returnHeaders: true });
+        const s = result.response;
+        // Rejected sessions may internally clear cookies. Do not emit/forward
+        // those headers; a live read must not create a replacement cookie.
+        if (!s || Date.parse(s.session.expiresAt.toISOString()) <= Date.now()) return null;
+        if (result.headers.has("set-cookie") || !ownerIdSchema.safeParse(s.user.id).success ||
+          !s.session.id || s.session.userId !== s.user.id) throw Error();
+        return { ownerId: s.user.id, id: s.session.id, expiresAt: s.session.expiresAt.toISOString() };
+      } catch { throw new LocalSessionError("unavailable"); }
     }
     return {
-      // Internal manual composition only. The workflow still calls the genuine
-      // signed-session API with supported read-only GET options, never a DTO.
+      // Server-internal capabilities only: never serialize request headers or
+      // auth results into a browser response. The workflow still calls genuine
+      // signed-session validation, not a submitted owner/session DTO.
       api: { getSession: auth.api.getSession }, headers,
+      headersFromRequest: requestHeaders, sessionFromHeaders,
       async session(cookie: string) {
+        // Preserve the manual exact-one-cookie input contract and error types.
         const validated = localSessionCookie(cookie);
-        try {
-          const requestHeaders = await headers(validated);
-          // disableRefresh alone still deletes expired rows. Supported GET +
-          // deferSessionRefresh avoids that deletion; DB read-only is a backstop.
-          const result = await auth.api.getSession({ method: "GET", headers: requestHeaders,
-            query: { disableRefresh: true, disableCookieCache: true }, returnHeaders: true });
-          const s = result.response;
-          // Expired/revoked reads can internally clear cookies. Nothing is ever
-          // forwarded/emitted. A live read must not issue replacement cookies.
-          if (!s || Date.parse(s.session.expiresAt.toISOString()) <= Date.now()) return null;
-          if (result.headers.has("set-cookie") || !ownerIdSchema.safeParse(s.user.id).success ||
-            !s.session.id || s.session.userId !== s.user.id) throw Error();
-          return { ownerId: s.user.id, id: s.session.id, expiresAt: s.session.expiresAt.toISOString() };
-        } catch { throw new LocalSessionError("unavailable"); }
+        return sessionFromHeaders(new Headers({ cookie: validated }));
       },
       close: () => closing ??= pool.end().catch(() => { throw new LocalSessionError("unavailable"); }),
     };

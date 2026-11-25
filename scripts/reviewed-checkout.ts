@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
 // Bind to the executing module, not whichever repository the caller selected.
 // Computing the URL loads no configuration and performs no Git operation.
-export const OPERATOR_ROOT=fileURLToPath(new URL("../",import.meta.url));
+export const OPERATOR_ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 export const OPERATOR_REQUIRED_FILES=Object.freeze([
   "package.json","package-lock.json","tsconfig.json","scripts/ebay-image-verification.ts","scripts/reviewed-checkout.ts",
   "scripts/image-verification-options.ts","scripts/image-verification-context.ts","scripts/image-verification-report.ts",

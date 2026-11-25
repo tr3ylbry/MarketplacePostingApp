@@ -1,14 +1,15 @@
-import { del, get, head, issueSignedToken, presignUrl } from "@vercel/blob";
+import { del, get, head, issueSignedToken, presignUrl, put } from "@vercel/blob";
 import { VercelBlobImageStorage } from "./vercelBlobImageStorage";
 import type { ImageUpload } from "../../application/imageStorage";
 
-vi.mock("@vercel/blob", () => ({ del: vi.fn(), get: vi.fn(), head: vi.fn(), issueSignedToken: vi.fn(), presignUrl: vi.fn() }));
+vi.mock("@vercel/blob", () => ({ del: vi.fn(), get: vi.fn(), head: vi.fn(), issueSignedToken: vi.fn(), presignUrl: vi.fn(), put: vi.fn() }));
 const storage = new VercelBlobImageStorage();
 const upload: ImageUpload = { id: "4ea3182c-53f6-49ba-b208-aadf2e4d6e5b", listingId: "listing", pathname: "images/4ea3182c-53f6-49ba-b208-aadf2e4d6e5b/photo.png", filename: "photo.png", contentType: "image/png", size: 12, expiresAt: new Date(Date.now() + 300000).toISOString() };
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_synthetic_fixture");
   vi.stubEnv("VERCEL_OIDC_TOKEN", ""); vi.stubEnv("BLOB_STORE_ID", "");
+  vi.stubEnv("VERCEL_BLOB_RETRIES", "0");
   vi.mocked(issueSignedToken).mockResolvedValue({ delegationToken: "server-only", clientSigningToken: "server-only-key", validUntil: Date.parse(upload.expiresAt) });
   vi.mocked(presignUrl).mockResolvedValue({ presignedUrl: "https://private.example/short-lived-capability" });
 });
@@ -62,4 +63,44 @@ it("rejects missing private objects and malformed trusted pathnames without sign
   vi.mocked(get).mockResolvedValue(null); await expect(storage.readPrivateImage(source, AbortSignal.timeout(1000))).rejects.toThrow();
   vi.mocked(get).mockClear(); await expect(storage.readPrivateImage({ ...source, pathname: "https://attacker.invalid/object" }, AbortSignal.timeout(1000))).rejects.toThrow();
   expect(get).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
+});
+
+const generatedUpload = { ...upload, filename: "generated.png", pathname: `images/${upload.id}/generated.png` };
+const generatedBytes = () => Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+it("writes a generated fixture privately once with explicit injected credentials, no overwrite or multipart fallback", async () => {
+  const instance = new VercelBlobImageStorage({ NODE_ENV:"test", BLOB_READ_WRITE_TOKEN: "explicit-synthetic-token" }), bytes = generatedBytes(), cancel = new AbortController();
+  await instance.writeGeneratedFixture(generatedUpload, bytes, cancel.signal);
+  expect(put).toHaveBeenCalledExactlyOnceWith(generatedUpload.pathname, bytes, expect.objectContaining({ token: "explicit-synthetic-token", access: "private", contentType: "image/png",
+    addRandomSuffix: false, allowOverwrite: false, multipart: false, maximumSizeInBytes: 12, cacheControlMaxAge: 60 }));
+  const signal = vi.mocked(put).mock.calls[0][2].abortSignal!;
+  expect(signal.aborted).toBe(false); cancel.abort(); expect(signal.aborted).toBe(true);
+  expect(issueSignedToken).not.toHaveBeenCalled(); expect(presignUrl).not.toHaveBeenCalled();
+});
+it.each([undefined, "1", "10", "00"])("refuses a generated write unless the real dedicated process disables SDK retries: %s", async retries => {
+  vi.stubEnv("VERCEL_BLOB_RETRIES", retries);
+  await expect(storage.writeGeneratedFixture(generatedUpload, generatedBytes(), AbortSignal.timeout(1000))).rejects.toThrow("Generated image setup is unavailable");
+  expect(put).not.toHaveBeenCalled();
+});
+it.each(["name", "type", "size", "overflow", "signature", "path", "id", "expired", "cancelled", "credentials"])("refuses invalid generated %s before SDK access", async kind => {
+  const candidate = { ...generatedUpload }, cancel = new AbortController(); let bytes = generatedBytes();
+  if (kind === "name") candidate.filename = "another.png";
+  if (kind === "type") candidate.contentType = "image/jpeg";
+  if (kind === "size") candidate.size = 13;
+  if (kind === "overflow") { bytes = Buffer.alloc(1_048_577); candidate.size = bytes.length; }
+  if (kind === "signature") bytes[0] = 0;
+  if (kind === "path") candidate.pathname = "https://synthetic.invalid/no";
+  if (kind === "id") candidate.id = "not-an-id";
+  if (kind === "expired") candidate.expiresAt = new Date(Date.now() - 1).toISOString();
+  if (kind === "cancelled") cancel.abort();
+  if (kind === "credentials") vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+  await expect(storage.writeGeneratedFixture(candidate, bytes, cancel.signal)).rejects.toThrow();
+  expect(put).not.toHaveBeenCalled(); expect(issueSignedToken).not.toHaveBeenCalled();
+});
+it("cancels an incomplete verification prefix through the caller signal and never treats it as verified", async () => {
+  const cancel = new AbortController(), cancelled = vi.fn();
+  vi.mocked(head).mockResolvedValue({ pathname: upload.pathname, size: 12, contentType: "image/png", uploadedAt: new Date() } as Awaited<ReturnType<typeof head>>);
+  vi.mocked(get).mockResolvedValue({ statusCode: 200, stream: new ReadableStream({ cancel: cancelled }), headers: new Headers(), blob: {} } as unknown as Awaited<ReturnType<typeof get>>);
+  const pending = storage.verifyUpload(upload, cancel.signal);
+  await vi.waitFor(() => expect(get).toHaveBeenCalledOnce()); cancel.abort();
+  await expect(pending).rejects.toThrow(); expect(cancelled).toHaveBeenCalledOnce();
 });

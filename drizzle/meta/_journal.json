@@ -92,6 +92,13 @@
       "when": 1795384831295,
       "tag": "0012_ebay_image_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795572770788,
+      "tag": "0013_local_image_operator",
+      "breakpoints": true
     }
   ]
 }

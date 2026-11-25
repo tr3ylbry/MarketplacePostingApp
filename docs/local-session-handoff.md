@@ -1,5 +1,7 @@
 # Local session handoff (no marketplace requests)
 
+For a separately approved diagnostic, prefer the [authenticated local browser operator](local-browser-image-operator.md). It keeps the existing HttpOnly session inside normal server authentication; no cookie copying or native rehearsal is required for that flow. The manual modes below remain unchanged and apply only when explicitly selected. Prior successful manual checks are historical evidence, not fresh browser acceptance or a revived experiment approval.
+
 The manual capture tool has two **local-only** modes. They never load the eBay/Blob/derivative composition, create OAuth state or media records, open consent, or exchange/refresh credentials. Neither requires eBay credentials, seller identifiers, listing/image IDs or Blob configuration. Normal application authentication is unchanged. Use Node 24 and the existing local database/auth configuration.
 
 These checks do **not** authorize consent or capture. A future provider experiment still needs a separately approved reviewed commit and request budget.
