@@ -31,7 +31,7 @@ it.each(["valid","missing","extra","hash","time","identity","unavailable"])("ins
 });
 function result():DiagnosticImageResult{return{state:"unknown",associated:false,retrieved:true,settlement:"settled",reason:"completed",acknowledgement:"recorded",
  diagnostic:{outcome:"retrieved",reason:"retrieved",bytes:2000,mime:"image/png",exceeded:false,unverified:true,associated:false,settlement:"settled"},
- visual:{recipe:IMAGE_COMPARISON_RECIPE,verdict:"match",reason:"matched",decoding:"passed",geometry:"passed",orientation:"passed",marker:"passed",color:"passed",similarity:"passed",settlement:"settled",associated:false,
+ visual:{recipe:IMAGE_COMPARISON_RECIPE,verdict:"match",reason:"matched",decoding:"passed",geometry:"passed",orientation:"passed",marker:"passed",color:"passed",similarity:"passed",settlement:"settled",associated:false,encodedDimensions:{width:500,height:600},
  metrics:{orientationErrors:0,orientationMargin:107,markerErrors:0,markerMargin:107,mae:0,rmse:0,tileMae:0,anchorDelta:0}}};}
 it("admits only the bounded diagnostic report, never usable-media admission",()=>expect(verificationOutcome(result())).toMatchObject({associated:false,state:"unknown",visual:{verdict:"match"}}));
 it.each(["url","path","code","recipe","nan","oversize","association"])("refuses unexpected/disclosing report %s",kind=>{
@@ -44,6 +44,15 @@ it.each(["url","path","code","recipe","nan","oversize","association"])("refuses 
 it("keeps a peer refusal distinct from a retrieved response",()=>{
  const r=result();r.retrieved=false;r.visual=null;r.diagnostic={...r.diagnostic!,outcome:"refused",reason:"peer",bytes:0,mime:null};
  expect(verificationOutcome(r).diagnostic).toMatchObject({outcome:"refused",reason:"peer"});
+});
+
+it.each([null,{width:600,height:500},{width:0,height:0xffffffff}])("reports only bounded header dimensions %j without admitting a mismatch",encodedDimensions=>{
+ const r=result();Object.assign(r.visual!,{verdict:"inconclusive",reason:"geometry",decoding:"not-run",geometry:"failed",encodedDimensions,metrics:null});
+ expect(verificationOutcome(r)).toMatchObject({associated:false,state:"unknown",visual:{verdict:"inconclusive",encodedDimensions}});
+});
+it.each([{width:-1,height:600},{width:500,height:0x100000000},{width:NaN,height:600},{width:500,height:Infinity},
+ {width:500.5,height:600},{width:"500",height:600},{width:500},{width:500,height:600,url:"https://private.invalid/capability"}])("refuses invalid/disclosing dimensions %j",encodedDimensions=>{
+ const r=result();Object.assign(r.visual!,{encodedDimensions});expect(()=>verificationOutcome(r)).toThrow();
 });
 
 it("reads a supplied trusted source root without changing the manual default root",async()=>{

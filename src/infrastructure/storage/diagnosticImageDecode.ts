@@ -9,7 +9,7 @@ const srgb = "c56e1685d888f5edb92fe07f2750f387f8fe8e91b32ff8fb0b56bfbbb9458353";
 const digest = (v: Buffer) => createHash("sha256").update(v).digest("hex");
 const refuse = (): never => { throw new ImageComparisonError("unsupported"); };
 function geometry(width: number, height: number) {
-  if (width !== policy.width || height !== policy.height) throw new ImageComparisonError("geometry");
+  if (width !== policy.width || height !== policy.height) throw new ImageComparisonError("geometry", { width, height });
 }
 // Framing helpers are shared, not the local derivative's metadata/encoder
 // allowlist. Provider responses may have standard metadata/progressive scans.
