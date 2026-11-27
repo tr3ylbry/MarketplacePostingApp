@@ -62,7 +62,7 @@ afterAll(async () => { if (isolated) await isolated.close(); });
 it("migrates fresh and repeatedly without weakening retained ledgers", async () => {
   await migrate(db, { migrationsFolder: "drizzle" });
   const result = await isolated.pool.query("SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations");
-  expect(result.rows[0].n).toBe(14);
+  expect(result.rows[0].n).toBe(15);
 });
 it("records exact immutable activation pins and manual Day-30/Day-90 obligations", async () => {
   const active = await row(); expect(active).toMatchObject({ phase: "armed", revision: 0, sessionHash: null, consentStartedAt: null, cleanupSessionHash: null });

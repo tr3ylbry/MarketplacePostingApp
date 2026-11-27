@@ -126,7 +126,7 @@ it("serves the real Next dev-fork operator as 401 without a session and armed/20
   let child: ChildProcess | undefined, settled: Promise<void> | undefined;
   try {
     isolated = await disposableVerificationDatabase();
-    expect((await isolated.pool.query("SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations")).rows[0].n).toBe(14);
+    expect((await isolated.pool.query("SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations")).rows[0].n).toBe(15);
     const results = join(sourceRoot, "test-results"); await mkdir(results, { recursive: true });
     temporary = await mkdtemp(join(results, "next-dev-")); await chmod(temporary, 0o700);
     const root = join(temporary, "app"), key = join(temporary, "key.pem"), certificate = join(temporary, "cert.pem"); await mkdir(root);
