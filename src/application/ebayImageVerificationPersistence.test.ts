@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { assertOfflineGuards } from "../test/offlinePrototypeGuards";
-import { verificationEnvelope, verificationIntentSchema, verificationPolicySchema, IMAGE_VERIFICATION_POLICY, IMAGE_VERIFICATION_POLICY_CUTOFF, VerificationPersistenceError } from "./ebayImageVerificationPersistence";
+import { verificationEnvelope, verificationIntentSchema, verificationPolicySchema, IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, IMAGE_VERIFICATION_POLICY_CUTOFF, VerificationPersistenceError } from "./ebayImageVerificationPersistence";
 import { IMAGE_ADDRESS_POLICY_DATA } from "../infrastructure/ebay/imagePublicAddressPolicyData";
 const good = { version: "diagnostic-verification-v1", event: "response", reason: "bounded-response", settlement: "settled", httpStatus: 200, bytes: 17, exceeded: false, mime: "image/png" };
 it("blocks external and private configuration access", assertOfflineGuards);
@@ -36,4 +36,14 @@ it.each(["contractVersion", "addressPolicyVersion", "addressPolicyDataHash"])("r
 it("requires syntactic UTC times without claiming they authenticate a response", () => {
   expect(verificationIntentSchema.parse({ responseReceivedAt: "2026-11-22T22:00:00.123456Z", providerExpiresAt: "2026-11-23T22:00:00Z" })).toBeDefined();
   expect(() => verificationIntentSchema.parse({ responseReceivedAt: "wrong", providerExpiresAt: "wrong" })).toThrow();
+});
+it("accepts only two paired field/contract profiles, never a response-field selector", () => {
+  expect(verificationPolicySchema.parse(MAXIMUM_IMAGE_VERIFICATION_POLICY)).toEqual(MAXIMUM_IMAGE_VERIFICATION_POLICY);
+  for (const policy of [IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY]) {
+    const other = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+    expect(() => verificationPolicySchema.parse({ ...policy, targetField: other.targetField })).toThrow();
+    expect(() => verificationPolicySchema.parse({ ...policy, contractVersion: other.contractVersion })).toThrow();
+    expect(() => verificationPolicySchema.parse({ ...policy, url: "https://synthetic.invalid/private" })).toThrow();
+    expect(Object.isFrozen(policy)).toBe(true);
+  }
 });

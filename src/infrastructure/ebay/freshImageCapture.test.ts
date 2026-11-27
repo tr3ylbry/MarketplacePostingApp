@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
-import { diagnosticImageWire, SYNTHETIC_PRIMARY } from "../../test/diagnosticImageWire";
+import { diagnosticImageWire, SYNTHETIC_PRIMARY, SYNTHETIC_MAXIMUM } from "../../test/diagnosticImageWire";
 import { acquirePhotoCapacity, releasePhotoCapacity } from "../../application/photoCapacity";
 import { mediaSessionHash, realMediaDigest } from "../../application/ebayRealMedia";
-import { observeFreshImage, downloadFreshImage, discardFreshImage, type FreshImageBinding } from "./freshImageCapture";
+import { observeFreshImage, observeFreshMaximumImage, downloadFreshImage, discardFreshImage, type FreshImageBinding } from "./freshImageCapture";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY } from "../../application/ebayImageVerificationPersistence";
 import { createCaptureClient, type CaptureRequest } from "./captureClient";
 import { imageWireResponse } from "../../test/imageDownloaderFixtures";
 vi.mock("server-only", () => ({}));
@@ -17,12 +18,15 @@ vi.mock("./imageAddressSetPolicy", async original => {
     return value.candidate ? { ...value, candidate: { address: "127.0.0.1", family: 4 as const } } : value;
   } };
 });
+describe.each([IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY])("fresh $targetField profile", policy => {
+const observeFixed = policy === MAXIMUM_IMAGE_VERIFICATION_POLICY ? observeFreshMaximumImage : observeFreshImage;
+const selectedUrl = policy === MAXIMUM_IMAGE_VERIFICATION_POLICY ? SYNTHETIC_MAXIMUM : SYNTHETIC_PRIMARY;
 let wire: Awaited<ReturnType<typeof diagnosticImageWire>>;
 const owned: Array<ReturnType<typeof acquirePhotoCapacity>> = [], handles: unknown[] = [];
 function lease() { const value = acquirePhotoCapacity(); owned.push(value); return value; }
 function binding(): FreshImageBinding {
   const ownerId = randomUUID(), sessionId = randomUUID(), listingId = randomUUID(), imageId = randomUUID(), h = realMediaDigest("synthetic");
-  return { operationId: randomUUID(), reservation: { id: randomUUID(), ownerId, actionHash: h, revision: 0,
+  return { operationId: randomUUID(), reservation: { id: randomUUID(), ownerId, actionHash: h, revision: 0, policy,
     parent: { id: randomUUID(), ownerId, listingId, imageId, token: randomUUID(), revision: 1, actionHash: h, sessionHash: mediaSessionHash(ownerId, sessionId) } },
     context: { ownerId, listingId, imageId, listingVersion: new Date().toISOString(), connectionId: randomUUID(), connectionVersion: randomUUID(),
       configHash: h, grantHash: h, sellerKey: h, sourceVersion: h, imageOrder: 0, mediaGrant: true, accessExpiresAt: new Date(Date.now() + 3_600_000).toISOString() },
@@ -30,7 +34,7 @@ function binding(): FreshImageBinding {
 }
 async function observe(b = binding(), controller = new AbortController(), until = Date.now() + 20_000) {
   const capacity = lease();
-  const value = await observeFreshImage(Buffer.from("synthetic PNG bytes"), "synthetic-only", b, { signal: controller.signal, capacity, until, monoUntil: performance.now() + 20_000 });
+  const value = await observeFixed(Buffer.from("synthetic PNG bytes"), "synthetic-only", b, { signal: controller.signal, capacity, until, monoUntil: performance.now() + 20_000 });
   handles.push(value.handle); return { ...value, binding: b, controller, capacity };
 }
 function options(value: Awaited<ReturnType<typeof observe>>) {
@@ -46,12 +50,12 @@ it("observes one native create, burns a private handle and preserves exact opaqu
   const opts = options(value), op = await downloadFreshImage(value.handle, value.binding, opts), result = await op.result; await op.settled;
   expect(result.diagnostic).toMatchObject({ outcome: "retrieved", bytes: 4, unverified: true, associated: false });
   expect(wire.posts).toHaveLength(1); expect(wire.image.requests).toHaveLength(1); expect(opts.intent).toHaveBeenCalledOnce();
-  expect(wire.image.requests[0].toString()).toContain("GET " + SYNTHETIC_PRIMARY.split(".com")[1] + " HTTP/1.1\r\n");
+  expect(wire.image.requests[0].toString()).toContain("GET " + selectedUrl.split(".com")[1] + " HTTP/1.1\r\n");
   expect(wire.image.requests[0].toString()).not.toMatch(/authorization|cookie|referrer|synthetic-only/i);
   await expect(downloadFreshImage(value.handle, value.binding, opts)).rejects.toThrow("Image download refused.");
   result.data?.fill(0);
 });
-it.each(["forged", "cloned", "serialized", "operation", "owner", "session", "seller", "connection", "grant", "config", "source", "derivative", "recipe", "parent", "reservation", "revision"])("refuses %s handles/bindings without DNS or GET", async kind => {
+it.each(["forged", "cloned", "serialized", "operation", "owner", "session", "seller", "connection", "grant", "config", "source", "derivative", "recipe", "parent", "reservation", "revision", "profile", "target"])("refuses %s handles/bindings without DNS or GET", async kind => {
   const value = await observe(), opts = options(value), bad = structuredClone(value.binding);
   expect(value.handle).not.toBeNull();
   let handle: unknown = value.handle;
@@ -71,6 +75,8 @@ it.each(["forged", "cloned", "serialized", "operation", "owner", "session", "sel
   if (kind === "parent") bad.reservation.parent.id = randomUUID();
   if (kind === "reservation") bad.reservation.id = randomUUID();
   if (kind === "revision") bad.reservation.parent.revision++;
+  if (kind === "profile") bad.reservation.policy = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+  if (kind === "target") Object.assign(bad.reservation.policy, { targetField: "Location" });
   await expect(downloadFreshImage(handle, bad, opts)).rejects.toThrow();
   expect(opts.intent).not.toHaveBeenCalled(); expect(wire.resolver.questions).toHaveLength(0); expect(wire.image.requests).toHaveLength(0);
   if (!["forged", "cloned", "serialized"].includes(kind)) await expect(downloadFreshImage(value.handle, value.binding, opts)).rejects.toThrow();
@@ -86,16 +92,17 @@ it.each(["cancelled", "disposed", "intent-lost-ack", "expiry"])("never restores 
   await expect(downloadFreshImage(value.handle, value.binding, options(value))).rejects.toThrow();
   expect(wire.image.requests).toHaveLength(0);
 });
-it.each(["missing-primary", "maximum-only", "duplicate", "escaped-duplicate", "truncated", "oversized", "utf8", "unsafe", "expiry", "non-utc", "headroom", "redirect", "error", "headers"])("issues no usable handle for %s responses", async kind => {
-  const good = () => ({ imageUrl: SYNTHETIC_PRIMARY, expirationDate: new Date(Date.now() + 3_600_000).toISOString() });
+it.each(["missing-selected", "null-selected", "malformed-selected", "duplicate", "escaped-duplicate", "truncated", "oversized", "utf8", "unsafe", "expiry", "non-utc", "headroom", "redirect", "error", "headers"])("issues no usable handle for %s responses", async kind => {
+  const good = () => ({ imageUrl: SYNTHETIC_PRIMARY, maxDimensionImageUrl: SYNTHETIC_MAXIMUM, expirationDate: new Date(Date.now() + 3_600_000).toISOString() });
   wire.response.body = () => {
-    if (kind === "missing-primary") return JSON.stringify({ expirationDate: good().expirationDate });
-    if (kind === "maximum-only") return JSON.stringify({ maxDimensionImageUrl: SYNTHETIC_PRIMARY, expirationDate: good().expirationDate });
+    if (kind === "missing-selected") { const value: Record<string,unknown> = good(); delete value[policy.targetField]; return JSON.stringify(value); }
+    if (kind === "null-selected") return JSON.stringify({ ...good(), [policy.targetField]: null });
+    if (kind === "malformed-selected") return JSON.stringify({ ...good(), [policy.targetField]: 17 });
     if (kind === "duplicate") return '{"imageUrl":"a","imageUrl":"b"}';
     if (kind === "escaped-duplicate") return '{"imageUrl":"a","image\\u0055rl":"b"}';
     if (kind === "truncated") return '{"imageUrl":';
     if (kind === "oversized") return "x".repeat(65_537);
-    if (kind === "unsafe") return JSON.stringify({ ...good(), imageUrl: "https://127.0.0.1/private" });
+    if (kind === "unsafe") return JSON.stringify({ ...good(), [policy.targetField]: "https://127.0.0.1/private" });
     if (kind === "expiry") return JSON.stringify({ ...good(), expirationDate: "2026-02-30T00:00:00Z" });
     if (kind === "non-utc") return JSON.stringify({ ...good(), expirationDate: "2027-01-01T00:00:00+01:00" });
     if (kind === "headroom") return JSON.stringify({ ...good(), expirationDate: new Date(Date.now() + 59_000).toISOString() });
@@ -131,7 +138,20 @@ it("cannot start DNS/GET after cancellation during an uncooperative intent promi
 it("retains capacity for an interrupted native response and leaves a later valid control possible", async () => {
   wire.response.send = (req, res) => { res.writeHead(201, { "Content-Type": "application/json", "Content-Length": "10000" }); res.write("{"); req.socket.destroy(); };
   const value = await observe(); expect(value.handle).toBeNull();
-  wire.response.send = undefined; wire.response.body = () => JSON.stringify({ imageUrl: SYNTHETIC_PRIMARY, expirationDate: new Date(Date.now() + 3_600_000).toISOString() });
+  wire.response.send = undefined; wire.response.body = () => JSON.stringify({ imageUrl: SYNTHETIC_PRIMARY, maxDimensionImageUrl: SYNTHETIC_MAXIMUM, expirationDate: new Date(Date.now() + 3_600_000).toISOString() });
   const next = await observe(); expect(next.handle).not.toBeNull();
   wire.image.requests.length = 0; expect(imageWireResponse().length).toBeGreaterThan(0);
+});
+
+it("cannot observe under the other profile, even before a POST", async () => {
+  const b = binding(); b.reservation.policy = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+  expect((await observe(b)).handle).toBeNull(); expect(wire.posts).toHaveLength(0);
+});
+it("same URL in both fields still yields only one one-use handle", async () => {
+  wire.response.body = () => JSON.stringify({ imageUrl:SYNTHETIC_PRIMARY, maxDimensionImageUrl:SYNTHETIC_PRIMARY, expirationDate:new Date(Date.now()+3_600_000).toISOString() });
+  const value = await observe(), opts = options(value), op = await downloadFreshImage(value.handle,value.binding,opts);
+  const result=await op.result; await op.settled; result.data?.fill(0);
+  await expect(downloadFreshImage(value.handle,value.binding,opts)).rejects.toThrow();
+  expect(wire.posts).toHaveLength(1); expect(wire.image.requests).toHaveLength(1);
+});
 });

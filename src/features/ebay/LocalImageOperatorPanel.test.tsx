@@ -26,6 +26,7 @@ it("renders all server controls inert and makes no passive call before or after 
   expect(fetchMock).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Run one image diagnostic" })).toBeDisabled();
   expect(screen.getByText(/Normal photo transfer, usable-media admission and Inventory writes remain unavailable/)).toBeVisible();
+  expect(screen.getByText(/Maximum-image profile: retrieves only the fresh response’s maxDimensionImageUrl/)).toBeVisible();
 });
 
 it("supports keyboard confirmation, posts only the exact action/revision and returns focus to status", async () => {

@@ -61,6 +61,14 @@ it.each(["png", "jpeg"])("reports a genuinely rotated %s without decoding or tra
     });
   } finally { rotated.fill(0); }
 });
+it.each(["png", "jpeg"])("rejects generated 334×400 %s pixels before response decoding", async format => {
+  const pipeline=sharp(png).resize(334,400,{fit:"fill"});
+  const bytes=await (format === "png" ? pipeline.png() : pipeline.jpeg()).toBuffer();
+  try {
+    expect(await compare(bytes,"image/"+format,false)).toMatchObject({verdict:"inconclusive",reason:"geometry",geometry:"failed",decoding:"not-run",
+      encodedDimensions:{width:334,height:400},orientation:"not-run",marker:"not-run",color:"not-run",similarity:"not-run",metrics:null});
+  } finally {bytes.fill(0);}
+});
 it.each([[499, 600], [500, 599], [250, 300], [1000, 1200], [0, 600], [0xffffffff, 0xffffffff]])(
   "bounds and reports PNG IHDR claims %i×%i before native allocation", async (width, height) => {
     const bytes = mapPng(png, (type, data) => {

@@ -17,7 +17,7 @@ import { handleEbayCallback } from "../src/application/ebayCallback";
 import { openLocalDatabasePool, openLocalSessionReader, localDatabase, LOCAL_ORIGIN } from "./local-session";
 import { assertLocalOperatorSource, localOperatorContext, type LocalOperatorActivationContext } from "./local-image-operator-source";
 import { assertVerificationJournal } from "./image-verification-context";
-import { runVerificationOperatorWithHeaders } from "./image-verification-runtime";
+import { runMaximumVerificationOperatorWithHeaders } from "./image-verification-runtime";
 import { createLocalOperatorFixturePreparer } from "./local-image-operator-fixture";
 import { localOperatorVerificationPins } from "./local-image-operator-pins";
 import type { VerificationPins } from "./image-verification-options";
@@ -107,7 +107,7 @@ export async function localImageOperatorApi(request:Request,env=process.env) {
           registry().start(id,"run",async signal=>{
             let report:string|null=null;
             try {
-              const result=await runVerificationOperatorWithHeaders({mode:"approve-one-post-one-get",pins:frozen,comparisonRecipe:IMAGE_COMPARISON_RECIPE},env,ownedHeaders,signal,()=>assertLocalOperatorSource(active),active.root);
+              const result=await runMaximumVerificationOperatorWithHeaders({mode:"approve-one-post-one-get",pins:frozen,comparisonRecipe:IMAGE_COMPARISON_RECIPE},env,ownedHeaders,signal,()=>assertLocalOperatorSource(active),active.root);
               report=JSON.stringify({exitCode:result.exitCode,...result.report});
               // Runtime returns only after its actual native/network settlement.
               await withRepository(env,active,r=>r.settle(id,actor.ownerId,runnerId));
@@ -121,7 +121,7 @@ export async function localImageOperatorApi(request:Request,env=process.env) {
           row=await repo.requestCancel(row.id,actor,input.revision);work.controller.abort();
         } else if(input.action==="cleanup") {
           row=await repo.beginCleanup(row.id,actor,input.revision);
-          const result=await runVerificationOperatorWithHeaders({mode:"cleanup-fixture",pins:pins(row,env)},env,h,new AbortController().signal,()=>assertLocalOperatorSource(active),active.root);
+          const result=await runMaximumVerificationOperatorWithHeaders({mode:"cleanup-fixture",pins:pins(row,env)},env,h,new AbortController().signal,()=>assertLocalOperatorSource(active),active.root);
           const report=result.report as {cleanup?:{status?:string;notBefore?:string}};
           if(result.exitCode!==0||report.cleanup?.status!=="queued"||!report.cleanup.notBefore)throw new LocalOperatorError("unavailable");
           row=await repo.recordCleanup(row.id,actor.ownerId,report.cleanup.notBefore);

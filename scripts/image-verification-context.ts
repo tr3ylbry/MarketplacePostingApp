@@ -28,7 +28,7 @@ export async function assertVerificationJournal(db: NodePgDatabase<typeof schema
     if (identity.rows[0]?.name !== expected) throw Error();
     const source = readMigrationFiles({ migrationsFolder: resolve(sourceRoot,"drizzle") });
     const applied = await db.execute(sql`SELECT hash, created_at::text AS at FROM drizzle.__drizzle_migrations ORDER BY created_at, id`);
-    if (source.length !== 14 || applied.rows.length !== source.length || source.some((m,i) =>
+    if (source.length !== 15 || applied.rows.length !== source.length || source.some((m,i) =>
       applied.rows[i].hash !== m.hash || applied.rows[i].at !== String(m.folderMillis))) throw Error();
   } catch { throw new VerificationOperatorError("journal"); }
 }

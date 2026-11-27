@@ -16,7 +16,7 @@ const mock = vi.hoisted(() => ({
   db: { execute: vi.fn(async () => ({ rows: [{ name: "local_image_operator_activations" }] })) },
   ordinaryDatabase: vi.fn(), openPool: vi.fn(), reader: vi.fn(), closeReader: vi.fn(async () => {}), source: vi.fn(), journal: vi.fn(async () => {}),
   constructClient: vi.fn(), exchange: vi.fn(), identity: vi.fn(), refresh: vi.fn(), cipher: vi.fn(),
-  run: vi.fn(), fixture: vi.fn(), methods: {} as Record<string, ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>>,
+  run: vi.fn(), maximumRun: vi.fn(), fixture: vi.fn(), methods: {} as Record<string, ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>>,
   context: { id: "00000000-0000-4000-8000-000000000001", head: "a".repeat(40), tree: "b".repeat(40), root: "/synthetic-reviewed-root" },
 }));
 vi.mock("dotenv", () => { throw Error("Private configuration forbidden"); });
@@ -33,7 +33,7 @@ vi.mock("../../scripts/local-image-operator-source", () => ({
   assertLocalOperatorSource: () => { mock.source(); if (!mock.sourceValid) throw new LocalOperatorError("context"); },
 }));
 vi.mock("../../scripts/image-verification-context", () => ({ assertVerificationJournal: mock.journal }));
-vi.mock("../../scripts/image-verification-runtime", () => ({ runVerificationOperatorWithHeaders: mock.run }));
+vi.mock("../../scripts/image-verification-runtime", () => ({ runVerificationOperatorWithHeaders: mock.run, runMaximumVerificationOperatorWithHeaders: mock.maximumRun }));
 vi.mock("../../scripts/local-image-operator-fixture", () => ({ createLocalOperatorFixturePreparer: () => mock.fixture }));
 vi.mock("../infrastructure/storage/photoDerivative/transformPhoto", () => ({ PHOTO_RECIPE: "synthetic-derivative-v1" }));
 vi.mock("../infrastructure/storage/diagnosticImageDecode", () => ({ IMAGE_COMPARISON_RECIPE: "synthetic-comparison-v1" }));
@@ -91,7 +91,7 @@ beforeEach(() => {
   mock.reader.mockImplementation(async () => mock.actor); mock.exchange.mockImplementation(async () => { mock.events.push("exchange-call"); return { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", expiresIn: 3600, refreshExpiresIn: 86400, scopes: [...EBAY_DISCOVERY_SCOPES] }; });
   mock.identity.mockImplementation(async () => { mock.events.push("identity-call"); return { sellerId: mock.row!.sellerKey, label: "Synthetic seller", source: "trading-get-user" }; }); mock.refresh.mockImplementation(async () => { throw Error("Refresh forbidden"); });
   mock.fixture.mockImplementation(async () => ({ imageId: "image-synthetic", listingVersion: new Date().toISOString() }));
-  mock.run.mockImplementation(async () => ({ exitCode: 0, report: { associated: false, operationSettled: true } }));
+  mock.maximumRun.mockImplementation(async () => ({ exitCode: 0, report: { associated: false, operationSettled: true } }));
   mock.methods = {
     activation: vi.fn(async (activation: string, owner: string) => mock.row?.id === activation && mock.row.ownerId === owner ? copy() : null),
     byStateHash: vi.fn(async (hash: string) => hash === mock.row?.consentStateHash ? copy() : null),
@@ -163,32 +163,32 @@ it("commits fixture allowance before asynchronous preparation and refuses a seco
   await vi.waitFor(() => expect(mock.fixture).toHaveBeenCalledOnce()); expect(mock.events.slice(0, 2)).toEqual(["fixture-commit", "fixture-storage"]);
   expect((await localImageOperatorApi(request("prepare-fixture", mock.row!.revision), env)).status).toBe(409);
   waiting.resolve({ imageId: "image-synthetic", listingVersion: new Date().toISOString() }); await completion("fixture");
-  expect(mock.methods.finalizeFixture).toHaveBeenCalledOnce(); expect(mock.run).not.toHaveBeenCalled();
+  expect(mock.methods.finalizeFixture).toHaveBeenCalledOnce(); expect(mock.maximumRun).not.toHaveBeenCalled();
 });
 it("commits one run before async work and does not mark cancellation settled early", async () => {
   ready(); const waiting = deferred<{ exitCode: number; report: { operationSettled: boolean; associated: false } }>(); let signal!: AbortSignal;
-  mock.run.mockImplementation(async (...args: unknown[]) => { signal = args[3] as AbortSignal; mock.events.push("run-start"); return waiting.promise; });
-  expect((await localImageOperatorApi(request("run"), env)).status).toBe(200); await vi.waitFor(() => expect(mock.run).toHaveBeenCalledOnce());
-  expect(mock.events.slice(0, 2)).toEqual(["run-commit", "run-start"]); expect(mock.run.mock.calls[0][2]).toBeInstanceOf(Headers); expect(mock.run.mock.calls[0][5]).toBe(mock.context.root);
+  mock.maximumRun.mockImplementation(async (...args: unknown[]) => { signal = args[3] as AbortSignal; mock.events.push("run-start"); return waiting.promise; });
+  expect((await localImageOperatorApi(request("run"), env)).status).toBe(200); await vi.waitFor(() => expect(mock.maximumRun).toHaveBeenCalledOnce());
+  expect(mock.events.slice(0, 2)).toEqual(["run-commit", "run-start"]); expect(mock.maximumRun.mock.calls[0][2]).toBeInstanceOf(Headers); expect(mock.maximumRun.mock.calls[0][5]).toBe(mock.context.root);
   expect((await localImageOperatorApi(request("run", mock.row!.revision), env)).status).toBe(409);
   expect((await localImageOperatorApi(request("cancel"), env)).status).toBe(200); expect(signal.aborted).toBe(true); expect(mock.methods.settle).not.toHaveBeenCalled(); expect(registry().get(mock.context.id, "run")!.settled).toBe(false);
   waiting.resolve({ exitCode: 1, report: { operationSettled: true, associated: false } }); await completion("run");
   expect(mock.methods.settle).toHaveBeenCalledOnce(); expect(mock.events.indexOf("cancel-commit")).toBeLessThan(mock.events.indexOf("settled-commit"));
-  expect((mock.run.mock.calls[0][2] as Headers).has("cookie")).toBe(false);
+  expect((mock.maximumRun.mock.calls[0][2] as Headers).has("cookie")).toBe(false);
 });
 it("treats durable started work with missing registry as unknown without restarting", async () => {
   ready(); mock.row!.phase = "running"; mock.row!.runStartedAt = new Date().toISOString(); mock.row!.runnerId = "old-runner";
-  const response = await localImageOperatorApi(request(), env); expect((await response.json()).state).toMatchObject({ phase: "unknown", canRun: false, canCancel: false, budget: { post: null, get: null } }); expect(mock.run).not.toHaveBeenCalled();
-  expect((await localImageOperatorApi(request("run"), env)).status).toBe(409); expect(mock.run).not.toHaveBeenCalled();
+  const response = await localImageOperatorApi(request(), env); expect((await response.json()).state).toMatchObject({ phase: "unknown", canRun: false, canCancel: false, budget: { post: null, get: null } }); expect(mock.maximumRun).not.toHaveBeenCalled();
+  expect((await localImageOperatorApi(request("run"), env)).status).toBe(409); expect(mock.maximumRun).not.toHaveBeenCalled();
 });
 it("uses persisted retention for cleanup presentation and guards local cleanup composition", async () => {
   ready(); mock.row!.phase = "settled"; mock.row!.settledAt = new Date().toISOString(); mock.retention = future();
   expect((await (await localImageOperatorApi(request(), env)).json()).state.canCleanup).toBe(false);
-  expect((await localImageOperatorApi(request("cleanup"), env)).status).toBe(409); expect(mock.run).not.toHaveBeenCalled();
+  expect((await localImageOperatorApi(request("cleanup"), env)).status).toBe(409); expect(mock.maximumRun).not.toHaveBeenCalled();
   mock.retention = new Date(Date.now() - 1000).toISOString(); const at = future();
-  mock.run.mockResolvedValue({ exitCode: 0, report: { cleanup: { status: "queued", notBefore: at } } });
+  mock.maximumRun.mockResolvedValue({ exitCode: 0, report: { cleanup: { status: "queued", notBefore: at } } });
   const response = await localImageOperatorApi(request("cleanup"), env); expect((await response.json()).state).toMatchObject({ phase: "cleanup-queued", cleanupNotBefore: at });
-  expect(mock.run.mock.calls[0][0]).toMatchObject({ mode: "cleanup-fixture" }); expect(mock.methods.recordCleanup).toHaveBeenCalledWith(mock.context.id, mock.actor!.ownerId, at); expect(mock.exchange).not.toHaveBeenCalled();
+  expect(mock.maximumRun.mock.calls[0][0]).toMatchObject({ mode: "cleanup-fixture" }); expect(mock.methods.recordCleanup).toHaveBeenCalledWith(mock.context.id, mock.actor!.ownerId, at); expect(mock.exchange).not.toHaveBeenCalled();
 });
 it.each(["HEAD", "host", "forwarded", "duplicate"])("rejects callback %s before SQL, state or exchange", async kind => {
   pending(); const request = kind === "HEAD" ? callback(undefined, "callback", { method: "HEAD" }) : kind === "host" ? new Request(`https://foreign.invalid/api/integrations/ebay/callback?state=${mock.state}`, { headers: { host: "foreign.invalid" } }) : kind === "forwarded" ? callback(undefined, "callback", { headers: { host: "127.0.0.1:3000", "x-forwarded-proto": "http" } }) : callback(`state=${mock.state}&state=${mock.state}`);

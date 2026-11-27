@@ -5,7 +5,7 @@ import { z } from "zod";
 import { ownerIdSchema } from "../../application/owner";
 import { mediaHash, mediaId, mediaSessionHash, realMediaDigest, type RealMediaClaim, type RealMediaReviewGuard } from "../../application/ebayRealMedia";
 import {
-  VerificationPersistenceError, verificationReservationSchema, verificationReferenceSchema, verificationIntentSchema,
+  VerificationPersistenceError, verificationReservationSchema, verificationReferenceSchema, verificationIntentSchema, verificationPolicySchema, sameVerificationPolicy,
   verificationCloseReason, verificationEnvelope, type VerificationReference, type VerificationReservation,
   type VerificationAcknowledgement, type VerificationStatus, type VerificationOutcomeInput, type VerificationCloseReason,
 } from "../../application/ebayImageVerificationPersistence";
@@ -14,6 +14,10 @@ import * as schema from "../db/schema";
 type Database = NodePgDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const reservations = schema.ebayImageVerifications, outcomes = schema.ebayImageVerificationOutcomes;
+const rowPolicy = (row: typeof reservations.$inferSelect) => verificationPolicySchema.parse({
+  contractVersion: row.contractVersion, targetField: row.targetField,
+  addressPolicyVersion: row.addressPolicyVersion, addressPolicyDataHash: row.addressPolicyDataHash,
+});
 type Parent = typeof schema.ebayRealMediaAttempts.$inferSelect;
 const bindingSchema = z.strictObject({
   ownerId: ownerIdSchema, listingId: mediaId, imageId: mediaId, listingVersion: z.iso.datetime(),
@@ -54,7 +58,7 @@ export class DrizzleEbayImageVerificationRepository {
     const [parent] = await tx.select().from(schema.ebayRealMediaAttempts).where(and(eq(schema.ebayRealMediaAttempts.id, ref.parent.id), eq(schema.ebayRealMediaAttempts.ownerId, ref.ownerId))).for("update");
     if (!owns(parent, ref.parent)) refuse();
     const [row] = await tx.select().from(reservations).where(and(eq(reservations.id, ref.id), eq(reservations.ownerId, ref.ownerId))).for("update");
-    if (!row || row.uploadAttemptId !== parent.id || row.actionHash !== ref.actionHash || ref.revision > row.revision) refuse();
+    if (!row || row.uploadAttemptId !== parent.id || row.actionHash !== ref.actionHash || ref.revision > row.revision || !sameVerificationPolicy(rowPolicy(row), ref.policy)) refuse();
     return row;
   }
   async reserveVerification(input: VerificationReservation): Promise<VerificationReference> {
@@ -71,7 +75,7 @@ export class DrizzleEbayImageVerificationRepository {
           ...value.policy, reviewUntil: value.reviewUntil, leaseUntil: value.reviewUntil,
           createdAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()`, reviewDueAt: sql`clock_timestamp()`, dispositionDueAt: sql`clock_timestamp()`,
         }).returning();
-        return { id: saved.id, ownerId: saved.ownerId, actionHash: saved.actionHash, parent: value.parent, revision: saved.revision };
+        return { id: saved.id, ownerId: saved.ownerId, actionHash: saved.actionHash, parent: value.parent, revision: saved.revision, policy: Object.freeze(rowPolicy(saved)) };
       });
     });
   }
@@ -82,7 +86,7 @@ export class DrizzleEbayImageVerificationRepository {
         const parent = await this.lockContext(tx, ref.parent, guard);
         const [row] = await tx.select().from(reservations).where(and(eq(reservations.id, ref.id), eq(reservations.ownerId, ref.ownerId))).for("update");
         if (!row || row.uploadAttemptId !== parent.id || row.actionHash !== ref.actionHash || parent.revision !== ref.parent.revision || parent.revision !== row.parentPreparingRevision + 1 ||
-          row.phase !== "prepared" || row.revision !== ref.revision) refuse();
+          row.phase !== "prepared" || row.revision !== ref.revision || !sameVerificationPolicy(rowPolicy(row), ref.policy)) refuse();
         const [saved] = await tx.update(reservations).set({ phase: "intent-recorded", revision: row.revision + 1,
           ...intent, requestIntentAt: sql`clock_timestamp()` }).where(and(eq(reservations.id, row.id), eq(reservations.revision, ref.revision))).returning();
         if (!saved) refuse();
@@ -175,7 +179,7 @@ export class DrizzleEbayImageVerificationRepository {
           eq(outcomes.fingerprint, sql`public.image_verification_outcome_fingerprint(${JSON.stringify(envelope)}::jsonb,${intentRevision})`)));
         const [current] = await tx.select({ overflow: reservations.evidenceOverflow }).from(reservations).where(eq(reservations.id, row.id));
         if (!saved && !current?.overflow) refuse();
-        return { evidenceId: saved?.id ?? null, late: saved?.late ?? true, overflow: !saved, associated: false };
+        return { evidenceId: saved?.id ?? null, late: saved?.late ?? true, overflow: !saved, associated: false, policy: Object.freeze(rowPolicy(row)) };
       });
     });
   }

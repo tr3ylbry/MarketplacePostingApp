@@ -13,12 +13,13 @@ import { localImageDns, localImageTls, DOWNLOAD_TEST_CA, DOWNLOAD_TEST_HOST, ima
 // DNS never forwards; download trust/port/peer substitutions prove only local
 // mechanics. The POST is observed over local HTTP, not a provider TLS proof.
 export const SYNTHETIC_PRIMARY = `https://${DOWNLOAD_TEST_HOST}/synthetic/image%41.png?opaque=A%2fb+Q&x=&x=2`;
+export const SYNTHETIC_MAXIMUM = `https://${DOWNLOAD_TEST_HOST}/synthetic/maximum%42.png?opaque=M%2fx+N&x=&x=2`;
 export async function diagnosticImageWire(databasePort?: number) {
   const allowed = new Set<number>(databasePort ? [databasePort] : []);
   const forbidden = vi.fn(() => { throw Error("Non-fixture network/private access forbidden."); });
   const connect = net.Socket.prototype.connect, tlsConnect = tls.connect, httpsRequest = https.request;
   const posts: Buffer[] = [], uploads: http.IncomingMessage[] = [];
-  const response = { status: 201, body: () => JSON.stringify({ imageUrl: SYNTHETIC_PRIMARY, maxDimensionImageUrl: "https://not-used.invalid/maximum", expirationDate: new Date(Date.now() + 3_600_000).toISOString() }),
+  const response = { status: 201, body: () => JSON.stringify({ imageUrl: SYNTHETIC_PRIMARY, maxDimensionImageUrl: SYNTHETIC_MAXIMUM, expirationDate: new Date(Date.now() + 3_600_000).toISOString() }),
     headers: ["Content-Type", "application/json"] as string[],
     before: (async () => {}) as (request: http.IncomingMessage, body: Buffer) => Promise<void>,
     send: undefined as undefined | ((request: http.IncomingMessage, res: http.ServerResponse) => void),

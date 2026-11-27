@@ -99,6 +99,13 @@
       "when": 1795572770788,
       "tag": "0013_local_image_operator",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795810514830,
+      "tag": "0014_maximum_image_verification",
+      "breakpoints": true
     }
   ]
 }

@@ -8,7 +8,8 @@ import type { VerificationOptions } from "./image-verification-options";
 import { assertVerificationDatabase, assertVerificationJournal, VerificationOperatorError, verificationFixtureTitle } from "./image-verification-context";
 import { queueVerificationFixtureCleanup } from "./image-verification-cleanup";
 import { verificationOutcome, unknownVerificationAccounting, type VerificationAccounting } from "./image-verification-report";
-import { createDiagnosticImageWorkflow, type DiagnosticImageOperation } from "../src/infrastructure/ebay/diagnosticImageWorkflow";
+import { createDiagnosticImageWorkflow, createMaximumDiagnosticImageWorkflow, type DiagnosticImageOperation } from "../src/infrastructure/ebay/diagnosticImageWorkflow";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, type VerificationPolicy } from "../src/application/ebayImageVerificationPersistence";
 import { createPhotoDerivativeService } from "../src/application/photoDerivativeService";
 import { EBAY_DISCOVERY_SCOPES, sameEbayScopes } from "../src/application/ebayConnection";
 import { PHOTO_RECIPE, photoTransformer } from "../src/infrastructure/storage/photoDerivative/transformPhoto";
@@ -30,7 +31,7 @@ type SessionInput = { kind: "manual"; cookie: string } | { kind: "request"; head
 // Preserve the existing CLI entry point and exact-cookie contract.
 export async function runVerificationOperator(options: OperationalOptions, env: NodeJS.ProcessEnv, cookie: string,
   signal: AbortSignal, stillReviewed: () => void) {
-  return runAuthenticatedVerificationOperator(options,env,{kind:"manual",cookie},signal,stillReviewed,OPERATOR_ROOT);
+  return runAuthenticatedVerificationOperator(options,env,{kind:"manual",cookie},signal,stillReviewed,OPERATOR_ROOT,IMAGE_VERIFICATION_POLICY);
 }
 
 // Only a trusted server request boundary supplies headers and sourceRoot. This
@@ -38,12 +39,21 @@ export async function runVerificationOperator(options: OperationalOptions, env: 
 export async function runVerificationOperatorWithHeaders(options: OperationalOptions, env: NodeJS.ProcessEnv, requestHeaders: Headers,
   signal: AbortSignal, stillReviewed: () => void, sourceRoot = OPERATOR_ROOT) {
   const ownedHeaders=new Headers(requestHeaders);
-  try { return await runAuthenticatedVerificationOperator(options,env,{kind:"request",headers:ownedHeaders},signal,stillReviewed,sourceRoot); }
+  try { return await runAuthenticatedVerificationOperator(options,env,{kind:"request",headers:ownedHeaders},signal,stillReviewed,sourceRoot,IMAGE_VERIFICATION_POLICY); }
+  finally { ownedHeaders.delete("cookie"); }
+}
+
+// Browser-led operator uses this fixed maximum-only composition. The request
+// cannot select a field; activation source pins bind this composition as well.
+export async function runMaximumVerificationOperatorWithHeaders(options: OperationalOptions, env: NodeJS.ProcessEnv, requestHeaders: Headers,
+  signal: AbortSignal, stillReviewed: () => void, sourceRoot = OPERATOR_ROOT) {
+  const ownedHeaders=new Headers(requestHeaders);
+  try { return await runAuthenticatedVerificationOperator(options,env,{kind:"request",headers:ownedHeaders},signal,stillReviewed,sourceRoot,MAXIMUM_IMAGE_VERIFICATION_POLICY); }
   finally { ownedHeaders.delete("cookie"); }
 }
 
 async function runAuthenticatedVerificationOperator(options: OperationalOptions, env: NodeJS.ProcessEnv, input: SessionInput,
-  signal: AbortSignal, stillReviewed: () => void, sourceRoot: string) {
+  signal: AbortSignal, stillReviewed: () => void, sourceRoot: string, policy: VerificationPolicy) {
   const p = options.pins;
   const cancelled = new AbortController(); signal=AbortSignal.any([signal,cancelled.signal]);
   assertVerificationDatabase(env,p.database); stillReviewed(); signal.throwIfAborted();
@@ -102,7 +112,8 @@ async function runAuthenticatedVerificationOperator(options: OperationalOptions,
     }
     const repository = new ObservedMedia(db), verification = new ObservedVerification(db), evidence = new DrizzleMediaCaptureRepository(db);
     const derivative = createPhotoDerivativeService(listings,new DrizzleImageRepository(db),connections,captureSource(env),photoTransformer,config.fingerprint);
-    const workflow = createDiagnosticImageWorkflow({ auth:reader.api,headers:()=>input.kind === "manual" ? reader.headers(input.cookie) : reader.headersFromRequest(input.headers),repository,verification,evidence,
+    const createWorkflow = policy === MAXIMUM_IMAGE_VERIFICATION_POLICY ? createMaximumDiagnosticImageWorkflow : createDiagnosticImageWorkflow;
+    const workflow = createWorkflow({ auth:reader.api,headers:()=>input.kind === "manual" ? reader.headers(input.cookie) : reader.headersFromRequest(input.headers),repository,verification,evidence,
       configHash:()=>config.fingerprint,recipe:()=>PHOTO_RECIPE,
       async derive(...args) {
         const photo = await derivative.derive(...args);
@@ -147,7 +158,7 @@ async function runAuthenticatedVerificationOperator(options: OperationalOptions,
     const success = !signal.aborted && accountingComplete && accounting.postBudgetConsumed === true && accounting.getBudgetConsumed === true &&
       accounting.postResponseObserved && accounting.getResponseObserved && result.reason === "completed" && result.settlement === "settled" &&
       result.retrieved && result.visual?.verdict === "match" && result.acknowledgement === "recorded";
-    return { exitCode:success?0:1,report:{ version:"diagnostic-operator-v1",mode:"approve-one-post-one-get",outcome:result,
+    return { exitCode:success?0:1,report:{ version:"diagnostic-operator-v1",mode:"approve-one-post-one-get",policy,outcome:result,
       operationSettled:true,accounting,accountingComplete,cleanup:"retained-use-separate-local-mode",associated:false,remoteErasureProven:false } };
   } catch (error) {
     if (error instanceof VerificationOperatorError) throw error;
