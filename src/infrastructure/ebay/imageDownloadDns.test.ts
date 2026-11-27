@@ -31,13 +31,13 @@ it.each(["id","question","type","class","size","forward","cycle","count","traili
   expect(()=>parseImageDnsAnswer(p,id,1)).toThrow("Image download refused.");
 });
 it("refuses seventeen address records before returning an array",()=>{expect(()=>parseImageDnsAnswer(answer(1,17),id,1)).toThrow();});
-it("supports a bounded complete CNAME chain and refuses its incomplete form",()=>{
+it("supports a bounded complete CNAME chain and uncached Type3 NODATA",()=>{
   const q=Buffer.from(imageDnsQuestion(id,1).subarray(2));q.writeUInt16BE(0x8180,2);q.writeUInt16BE(2,6);
   const name=Buffer.from([5,...Buffer.from("alias"),7,...Buffer.from("invalid"),0]);
   const cname=Buffer.alloc(12);cname.writeUInt16BE(0xc00c);cname.writeUInt16BE(5,2);cname.writeUInt16BE(1,4);cname.writeUInt16BE(name.length,10);
   const address=Buffer.alloc(14);address.writeUInt16BE(1);address.writeUInt16BE(1,2);address.writeUInt16BE(4,8);address.set([1,1,1,1],10);
   const r=parseImageDnsAnswer(Buffer.concat([q,cname,name,name,address]),id,1);expect(r.canonical).toBe("alias.invalid");expect(r.addresses[0].address).toBe("1.1.1.1");
-  q.writeUInt16BE(1,6);expect(()=>parseImageDnsAnswer(Buffer.concat([q,cname,name]),id,1)).toThrow();
+  q.writeUInt16BE(1,6);expect(parseImageDnsAnswer(Buffer.concat([q,cname,name]),id,1)).toEqual({code:0,canonical:"alias.invalid",addresses:[]});
 });
 
 function dnsName(value:string){return Buffer.concat([...value.split(".").map(label=>Buffer.concat([Buffer.from([label.length]),Buffer.from(label)])),Buffer.from([0])]);}

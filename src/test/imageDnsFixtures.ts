@@ -52,9 +52,9 @@ export function dnsFixtureQuestions(written: Buffer): Array<{ id: number; type: 
   }
   return questions;
 }
-// Independent expected labels for the six pre-existing refusal conditions.
+// Independent expected labels for six still-refused negative/referral shapes.
 export const dnsNegativeFixtures = [
-  { reason: "missing-terminal-soa", options: { answers: [dnsFixtureAlias()] } },
+  { reason: "missing-terminal-soa", options: { answers: [dnsFixtureAlias()], authority: [dnsFixtureNs()] } },
   { reason: "soa-count", options: { answers: [dnsFixtureAlias()], authority: [dnsFixtureSoa(), dnsFixtureSoa()] } },
   { reason: "soa-class", options: { answers: [dnsFixtureAlias()], authority: [dnsFixtureSoa("invalid.test", 3)] } },
   { reason: "soa-owner", options: { answers: [dnsFixtureAlias()], authority: [dnsFixtureSoa("elsewhere.test")] } },
