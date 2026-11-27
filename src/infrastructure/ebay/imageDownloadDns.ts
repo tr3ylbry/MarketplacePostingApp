@@ -98,11 +98,13 @@ export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): I
     seen.add(canonical); canonical = aliases.get(canonical)!;
   }
   if (seen.size !== aliases.size || records.some(r => r.owner !== canonical)) return bad();
-  // RFC2308 permits a CNAME chain before terminal NODATA/NXDOMAIN. Admit only
-  // our bounded SOA-backed form; an NS referral or unproven CNAME-only result
-  // is not permission for a follow-up query. This is one resolver's report,
-  // never authoritative/global absence or an address candidate by itself.
-  if (records.length === 0) {
+  // RFC2308 section2.2 Type3 NODATA may follow CNAMEs with empty authority.
+  // Accept only NOERROR with no authority/additional records in that case.
+  // It supplies no address, negative cache entry or follow-up permission;
+  // the paired reply must still agree and the full address set must pass.
+  // SOA-bearing negatives retain their semantic checks; referrals refuse.
+  const uncachedType3 = code === 0 && authority === 0 && additional === 0;
+  if (records.length === 0 && !uncachedType3) {
     if (aliases.size || negativeSoas.length) {
       const refusal = terminalNegativeSoaRefusal(packet, negativeSoas, canonical);
       if (refusal) return bad(refusal);
