@@ -7,7 +7,8 @@ import type { ImageAddressCandidate } from "./imageAddressSetPolicy";
 import { ImageDnsRefusal, type ImageDnsDiagnostic } from "./imageDownloadDiagnostics";
 
 export const IMAGE_DNS_MESSAGE_LIMIT = 16_384;
-const bad = (reason: "invalid-message" | "negative-incomplete" = "invalid-message"): never => { throw new ImageDnsRefusal("parse", reason); };
+type NegativeSoaReason = "missing-terminal-soa" | "soa-count" | "soa-class" | "soa-owner" | "soa-layout";
+const bad = (reason: "invalid-message" | NegativeSoaReason | "ns-only-authority" = "invalid-message"): never => { throw new ImageDnsRefusal("parse", reason); };
 function nameAt(packet: Buffer, start: number, opaqueLabels = false): { name: string; end: number } {
   let at = start, end = -1, hops = 0, length = 0;
   const labels: string[] = [];
@@ -42,15 +43,17 @@ export function imageDnsQuestion(id: number, type: 1 | 28): Buffer {
 }
 export interface ImageDnsAnswer { code: 0 | 3; canonical: string; addresses: readonly ImageAddressCandidate[] }
 interface NegativeSoa { owner: string; klass: number; start: number; end: number }
-function terminalNegativeSoa(packet: Buffer, records: readonly NegativeSoa[], canonical: string) {
-  if (records.length !== 1) return false;
+function terminalNegativeSoaRefusal(packet: Buffer, records: readonly NegativeSoa[], canonical: string): NegativeSoaReason | null {
+  if (records.length === 0) return "missing-terminal-soa";
+  if (records.length !== 1) return "soa-count";
   const soa = records[0];
-  if (soa.klass !== 1 || soa.owner && canonical !== soa.owner && !canonical.endsWith("." + soa.owner)) return false;
+  if (soa.klass !== 1) return "soa-class";
+  if (soa.owner && canonical !== soa.owner && !canonical.endsWith("." + soa.owner)) return "soa-owner";
   // RFC1035 SOA contains two wire-format names and five uint32 fields.
   // Those names are framing only, not connection candidates; mailbox labels
   // need not use the preferred hostname alphabet enforced for CNAME targets.
   const mname = nameAt(packet, soa.start, true), rname = nameAt(packet, mname.end, true);
-  return rname.end + 20 === soa.end;
+  return rname.end + 20 === soa.end ? null : "soa-layout";
 }
 /** Restrictive bounded DNS grammar. No CNAME follow-up, search list or repair. */
 export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): ImageDnsAnswer {
@@ -101,8 +104,9 @@ export function parseImageDnsAnswer(packet: Buffer, id: number, type: 1 | 28): I
   // never authoritative/global absence or an address candidate by itself.
   if (records.length === 0) {
     if (aliases.size || negativeSoas.length) {
-      if (!terminalNegativeSoa(packet, negativeSoas, canonical)) return bad("negative-incomplete");
-    } else if (code === 0 && authorityNameServer) return bad("negative-incomplete");
+      const refusal = terminalNegativeSoaRefusal(packet, negativeSoas, canonical);
+      if (refusal) return bad(refusal);
+    } else if (code === 0 && authorityNameServer) return bad("ns-only-authority");
   }
   return { code: code as 0 | 3, canonical, addresses: records.map(({ address, family }) => Object.freeze({ address, family })) };
 }

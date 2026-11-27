@@ -3,7 +3,9 @@ import { ImageDownloadRefusal } from "./imageDownloadPolicy";
 // Operation-local categories only. No server/address, question, packet, URL,
 // message, stack, errno or original Error object belongs in this projection.
 export const DNS_DIAGNOSTIC_PHASES = ["configuration", "connect", "exchange", "framing", "parse", "combine", "resolution"] as const;
-export const DNS_DIAGNOSTIC_REASONS = ["invalid-server", "native-error", "closed", "limit", "invalid-frame", "invalid-message", "negative-incomplete", "inconsistent-answers", "aborted", "deadline"] as const;
+// Keep negative-incomplete for reports produced before the fixed subcategories.
+export const DNS_DIAGNOSTIC_REASONS = ["invalid-server", "native-error", "closed", "limit", "invalid-frame", "invalid-message", "negative-incomplete",
+  "missing-terminal-soa", "soa-count", "soa-class", "soa-owner", "soa-layout", "ns-only-authority", "inconsistent-answers", "aborted", "deadline"] as const;
 export const DNS_NATIVE_CODES = ["EACCES", "EPERM", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "EHOSTUNREACH", "EADDRNOTAVAIL", "EPIPE", "ENOBUFS", "ENOMEM", "EMFILE", "ENFILE", "EINVAL", "ERR_SOCKET_BAD_PORT", "ERR_INVALID_IP_ADDRESS"] as const;
 export interface ImageDnsDiagnostic {
   readonly phase: typeof DNS_DIAGNOSTIC_PHASES[number];
