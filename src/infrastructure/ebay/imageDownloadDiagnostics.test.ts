@@ -3,6 +3,7 @@ import { assertOfflineGuards } from "../../test/offlinePrototypeGuards";
 import { DNS_NATIVE_CODES, ImageDnsRefusal, imageDnsDiagnostic } from "./imageDownloadDiagnostics";
 import { verificationOutcome } from "../../../scripts/image-verification-report";
 import { verificationEnvelope } from "../../application/ebayImageVerificationPersistence";
+import { dnsNegativeFixtures } from "../../test/imageDnsFixtures";
 vi.mock("server-only", () => ({}));
 
 const result = (dns?: unknown) => ({
@@ -46,4 +47,18 @@ it("does not broaden the persisted SQL evidence envelope", () => {
     httpStatus: null, bytes: 0, exceeded: false, mime: null };
   expect(verificationEnvelope(persisted)).toEqual(persisted);
   expect(() => verificationEnvelope({ ...persisted, dns: imageDnsDiagnostic("connect", "native-error", { code: "EPERM" }) })).toThrow();
+});
+it.each([...dnsNegativeFixtures.map(v => v.reason), "negative-incomplete"] as const)("strictly bounds transient %s and never persists it", reason => {
+  const dns = imageDnsDiagnostic("parse", reason, { code: "EPERM", message: "PRIVATE-MESSAGE", packet: "PRIVATE-PACKET" });
+  expect(dns).toEqual({ phase: "parse", reason, nativeCode: null }); expect(Object.isFrozen(dns)).toBe(true);
+  const parsed = verificationOutcome(result(dns) as Parameters<typeof verificationOutcome>[0]);
+  expect(parsed.diagnostic?.dns).toEqual(dns); expect(Buffer.byteLength(JSON.stringify(dns))).toBeLessThan(120);
+  expect(JSON.stringify(parsed)).not.toContain("PRIVATE-");
+  const persisted = { version: "diagnostic-verification-v1", event: "failure", reason: "transport", settlement: "unsettled",
+    httpStatus: null, bytes: 0, exceeded: false, mime: null };
+  expect(() => verificationEnvelope({ ...persisted, dns })).toThrow();
+  for (const extra of ["packet", "question", "address", "url", "server", "message", "stack", "errno"]) {
+    expect(() => verificationOutcome(result({ ...dns, [extra]: "PRIVATE" }) as Parameters<typeof verificationOutcome>[0])).toThrow();
+  }
+  expect(() => verificationOutcome(result({ ...dns, nativeCode: "EPERM" }) as Parameters<typeof verificationOutcome>[0])).toThrow();
 });

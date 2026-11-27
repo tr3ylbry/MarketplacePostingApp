@@ -33,6 +33,23 @@ The transient diagnostic may include an optional `dns` object with fixed `phase`
 
 The projection never includes resolver addresses, DNS questions/packets, URLs, raw error messages/stacks, native socket objects or arbitrary native metadata. Unknown/unreadable codes become `null`; the first classified refusal is preserved. The strict manual-report validator accepts this bounded optional object and legacy reports without it. Persisted SQL outcome envelopes are unchanged: they retain the existing coarse transport category, without this operation-local detail. No migration or additional persisted diagnostic history is introduced.
 
+Negative-proof refusals keep outer reason `dns`, phase `parse` and `nativeCode:null`, with these fixed subcategories:
+
+| Reason | Existing refusal condition |
+| --- | --- |
+| `missing-terminal-soa` | A terminal negative needs SOA proof, but no authority SOA exists (including CNAME-only or SOA only in additional). |
+| `soa-count` | More than one authority SOA prevents qualifying proof. |
+| `soa-class` | The sole authority SOA is not IN class. |
+| `soa-owner` | Its owner is neither the terminal name nor a label-boundary ancestor. |
+| `soa-layout` | Its framed names do not leave exactly twenty bytes for the five numeric fields. |
+| `ns-only-authority` | The existing direct NOERROR branch has NS authority but no address, CNAME or authority SOA. |
+
+The check order remains count, class, owner, name framing, numeric layout. Malformed names/compression still report `invalid-message`; a wrong class/owner or duplicate SOA can refuse before its names are inspected. An alias with NS-only authority needs terminal SOA proof and reports `missing-terminal-soa`. The codes do not certify protocol validity: the direct NS branch tests record-type presence, not arbitrary NS semantics. Native I/O, TCP framing, family disagreement and downstream address-policy failures remain separate.
+
+Legacy `negative-incomplete` reports and reports without `dns` remain valid. New codes add no diagnostic structure or persisted fields. Invented packet and EventEmitter regressions preserve the previous accepted/refused decisions, successful results, limits, both-family requirements, first-error and settlement behavior. No failed family is ignored and no fallback, follow-up or retry is introduced.
+
+The latest M3 refusal's actual response packet is unavailable. Synthetic examples can reproduce these categories but cannot identify that historical packet or establish real DNS/image compatibility. This reporting change leaves original attempts unknown/unassociated, consumed budgets exhausted, permanent fences, retention obligations and queued cleanup intact. It authorizes no experiment, cleanup, normal EPS transport, real admission or Inventory write.
+
 The compatibility regressions use invented SOA-backed negative responses and local-only TCP/TLS/HTTP fixtures. They establish an old parser gap, not the cause of a historical real DNS refusal. That historical native cause was not retained and remains unknown. This correction does not establish real-host compatibility, authorize a lookup, replenish an exhausted budget or release a fence.
 
 ## One pinned TLS connection and anonymous HTTP
