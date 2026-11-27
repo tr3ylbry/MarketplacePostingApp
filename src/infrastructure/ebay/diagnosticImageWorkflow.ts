@@ -6,11 +6,11 @@ import { acquirePhotoCapacity, releasePhotoCapacity, type PhotoCapacity } from "
 import { PhotoDerivativeError, type PhotoDerivative } from "../../application/photoDerivative";
 import { mediaId, mediaHash, mediaSessionHash, realMediaDigest, RealMediaError,
   type RealMediaClaim, type RealMediaReviewGuard, type RealMediaSnapshot, type RealMediaRepository } from "../../application/ebayRealMedia";
-import { IMAGE_VERIFICATION_POLICY, type VerificationReference, type VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, sameVerificationPolicy, type VerificationPolicy, type VerificationReference, type VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
 import type { DrizzleEbayImageVerificationRepository } from "../repositories/drizzleEbayImageVerificationRepository";
 import type { DrizzleMediaCaptureRepository } from "../repositories/drizzleMediaCaptureRepository";
 import { CAPTURE_IMAGE_BYTES, type CaptureReport } from "../../application/ebayCaptureReport";
-import { observeFreshImage, downloadFreshImage, discardFreshImage, freshImageBindingSchema, type FreshImageHandle } from "./freshImageCapture";
+import { observeFreshImage, observeFreshMaximumImage, downloadFreshImage, discardFreshImage, freshImageBindingSchema, type FreshImageHandle } from "./freshImageCapture";
 import { downloadDeferred } from "./imageDownloadWork";
 import type { ImageDownloadDiagnostic, ImageDownloadOperation } from "./imageDownloader";
 import { IMAGE_DOWNLOAD_POLICY_CUTOFF } from "./imageDownloadPolicy";
@@ -56,9 +56,15 @@ export function diagnosticEnvelope(value: Readonly<ImageDownloadDiagnostic>): Ve
     httpStatus: value.outcome === "retrieved" ? 200 : null, bytes: value.bytes, exceeded: value.exceeded, mime: value.mime };
 }
 
-/** Internal composition only: no runtime/CLI/route/job imports this factory.
- * Neither a review, a successful diagnostic nor any retained row is admission. */
+/** Internal fixed compositions. Neither a review, a successful diagnostic nor
+ * any retained row is admission. Profile choice precedes prepare/upload. */
 export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies) {
+  return createWorkflow(deps, IMAGE_VERIFICATION_POLICY, observeFreshImage);
+}
+export function createMaximumDiagnosticImageWorkflow(deps: DiagnosticImageDependencies) {
+  return createWorkflow(deps, MAXIMUM_IMAGE_VERIFICATION_POLICY, observeFreshMaximumImage);
+}
+function createWorkflow(deps: DiagnosticImageDependencies, policy: VerificationPolicy, observe: typeof observeFreshImage) {
   const reviews = new WeakMap<object, Review>();
   let used = false;
   async function actor() {
@@ -93,7 +99,7 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
         const expires = Math.min(wall + 300_000, a.expires, Date.parse(b.accessExpiresAt ?? "") - 30_000, IMAGE_DOWNLOAD_POLICY_CUTOFF);
         if (!Number.isSafeInteger(wall) || !Number.isFinite(mono) || !Number.isSafeInteger(expires) || expires <= wall ||
           !b.mediaGrant || b.ownerId !== a.ownerId || b.sellerKey !== expectedSeller || b.configHash !== deps.configHash()) throw new RealMediaError("stale");
-        const review = Object.freeze({ diagnosticOnly: true, associated: false, expiresAt: new Date(expires).toISOString() });
+        const review = Object.freeze({ diagnosticOnly: true, associated: false, policy, expiresAt: new Date(expires).toISOString() });
         reviews.set(review, { guard: { binding: Object.freeze({ ...b }), sessionId: a.id }, sourceDigest: expectedSourceDigest,
           recipe: deps.recipe(), actionHash: realMediaDigest(randomUUID()), operationId: randomUUID(), expires,
           monoUntil: mono + expires - wall, lastWall: wall, lastMono: mono });
@@ -129,6 +135,7 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
             const status = await deps.verification.status(ref.ownerId, ref.id);
             if (!status) { reason ??= "unavailable"; acknowledgement="uncertain"; return; }
             const ack=await deps.verification.recordOutcome(ref, { intentRevision: status.phase === "intent-recorded" ? 1 : null, envelope: value });
+            if (!sameVerificationPolicy(ack.policy, policy)) throw new RealMediaError("stale");
             if(acknowledgement!=="uncertain")acknowledgement=ack.overflow||!ack.evidenceId?"overflow":acknowledgement==="overflow"?"overflow":"recorded";
             return;
           } catch { /* Same bounded local acknowledgement only; no I/O retry. */ }
@@ -159,7 +166,8 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
             {wallUntil:wallEnd,monoUntil:monoEnd},signal,capacity);
           await current(r,signal,wallEnd,monoEnd);
           ref = await deps.verification.reserveVerification({ parent: claim, guard, actionHash: realMediaDigest("verification:" + r.actionHash),
-            sourceDigest: photo.sourceDigest, derivativeDigest: photo.derivativeDigest, reviewUntil: new Date(r.expires).toISOString(), policy: IMAGE_VERIFICATION_POLICY });
+            sourceDigest: photo.sourceDigest, derivativeDigest: photo.derivativeDigest, reviewUntil: new Date(r.expires).toISOString(), policy });
+          if (!sameVerificationPolicy(ref.policy, policy)) throw new RealMediaError("stale");
           check(r, signal, wallEnd, monoEnd);
           const token = await deps.credential(b);
           await current(r, signal, wallEnd, monoEnd);
@@ -179,7 +187,7 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
           const uploadWindow = await deps.verification.window(ref, guard, "prepared");
           if (realMediaDigest(photo.bytes) !== photo.derivativeDigest) throw new RealMediaError("stale");
           check(r, signal, wallEnd, monoEnd);
-          const observed = await observeFreshImage(photo.bytes, token, binding, { signal, capacity,
+          const observed = await observe(photo.bytes, token, binding, { signal, capacity,
             until: Math.min(wallEnd, ...Object.values(uploadWindow)), monoUntil: monoEnd });
           handle = observed.handle;
           await captureEvidence(observed.report);
@@ -188,6 +196,7 @@ export function createDiagnosticImageWorkflow(deps: DiagnosticImageDependencies)
           download = await downloadFreshImage(handle, binding, { signal, capacity, async intent(times) {
             await current(r, signal, wallEnd, monoEnd);
             ref = await deps.verification.recordRequestIntent(ref!, guard, times); // An uncertain acknowledgement throws: never start DNS/GET.
+            if (!sameVerificationPolicy(ref.policy, policy)) throw new RealMediaError("stale");
             const deadlines = await deps.verification.window(ref, guard, "intent-recorded");
             check(r, signal, wallEnd, monoEnd);
             return { deadlines, beforeRequest: async () => {

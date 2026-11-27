@@ -5,7 +5,7 @@ import { betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Pool } from "pg";
 import { disposableVerificationDatabase } from "../../test/disposableVerificationDatabase";
-import { diagnosticImageWire } from "../../test/diagnosticImageWire";
+import { diagnosticImageWire, SYNTHETIC_PRIMARY, SYNTHETIC_MAXIMUM } from "../../test/diagnosticImageWire";
 import { imageWireResponse } from "../../test/imageDownloaderFixtures";
 import { MemoryImageStorage } from "../../test/storage/memoryImageStorage";
 import { privateTerminal } from "../../test/privateTerminal";
@@ -25,7 +25,8 @@ import { EbayTokenCipher } from "./tokenCipher";
 import { ebayConfig } from "./config";
 import { mediaRuntime } from "./mediaRuntime";
 import { admitRealMediaEvidence } from "./realMediaEvidence";
-import { runVerificationOperator,runVerificationOperatorWithHeaders } from "../../../scripts/image-verification-runtime";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY } from "../../application/ebayImageVerificationPersistence";
+import { runVerificationOperator,runVerificationOperatorWithHeaders,runMaximumVerificationOperatorWithHeaders } from "../../../scripts/image-verification-runtime";
 import { runImageVerificationTool } from "../../../scripts/ebay-image-verification";
 import { verificationFixtureTitle } from "../../../scripts/image-verification-context";
 import type { VerificationPins,VerificationOptions } from "../../../scripts/image-verification-options";
@@ -246,10 +247,13 @@ it("refuses a mismatched actual disposable migration journal without initializin
  finally{await isolated.pool.query("UPDATE drizzle.__drizzle_migrations SET hash=$1 WHERE id=$2",[row.hash,row.id]);}
 });
 
-it("uses genuine request headers through the same full diagnostic without cookie export or session mutation",async()=>{
+it.each([{runner:runVerificationOperatorWithHeaders,policy:IMAGE_VERIFICATION_POLICY,target:SYNTHETIC_PRIMARY},
+ {runner:runMaximumVerificationOperatorWithHeaders,policy:MAXIMUM_IMAGE_VERIFICATION_POLICY,target:SYNTHETIC_MAXIMUM}])("uses genuine headers through the fixed $policy.targetField diagnostic without cookie export or session mutation",async({runner,policy,target})=>{
  const incoming=new Headers({cookie:"ui-preference=compact; "+cookie+"; other-state=synthetic",origin:"https://127.0.0.1:3000",host:"127.0.0.1:3000"});
  const before=await connection(),session=await db.select().from(schema.sessions).where(eq(schema.sessions.id,sessionId));
- const result=await runVerificationOperatorWithHeaders(options(),env,incoming,new AbortController().signal,()=>{},OPERATOR_ROOT);
+ const result=await runner(options(),env,incoming,new AbortController().signal,()=>{},OPERATOR_ROOT);
+ expect(result.report).toMatchObject({policy}); expect((await children())[0]).toMatchObject(policy);
+ expect(wire.image.requests[0].toString()).toContain("GET "+target.split(".com")[1]+" HTTP/1.1\r\n");
  expect(result).toMatchObject({exitCode:0,report:{operationSettled:true,accountingComplete:true,outcome:{retrieved:true,visual:{verdict:"match"},acknowledgement:"recorded"},associated:false}});
  expect(incoming.get("cookie")).toContain(cookie);expect(incoming.get("origin")).toBe("https://127.0.0.1:3000");
  expect(JSON.stringify(result)).not.toContain(cookie);expect(JSON.stringify(result)).not.toMatch(/opaque|image%41|synthetic-operator-access|pathname|ciphertext/);

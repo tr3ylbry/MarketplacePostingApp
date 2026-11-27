@@ -174,6 +174,7 @@ export function LocalImageOperatorPanel({ initialState }: { initialState: LocalO
   return <section className="panel" aria-labelledby="local-image-operator-title" aria-busy={busy}>
     <h2 id="local-image-operator-title">Approved image diagnostic — SANDBOX</h2>
     <p>Local development only. This single diagnostic uses a generated test image. It does not publish a listing or create usable media.</p>
+    <p>Maximum-image profile: retrieves only the fresh response’s maxDimensionImageUrl. There is no primary-image fallback. The exact 500×600 check remains required.</p>
     <p ref={statusElement} tabIndex={-1} role="status">{phaseLabels[state.phase]}. {state.message}</p>
     <p>The four-slot limit includes failed and uncertain requests. Consumed slots cannot be reused; there is no refresh, retry or alternate image.</p>
     <dl aria-label="Request allowance">

@@ -59,7 +59,7 @@ it("reads a supplied trusted source root without changing the manual default roo
  const root=mkdtempSync(join(tmpdir(),"marketplace-operator-journal-"));
  try{
   mkdirSync(join(root,"drizzle","meta"),{recursive:true});
-  const entries=Array.from({length:14},(_,idx)=>({idx,version:"7",when:1700000000000+idx,tag:`${String(idx).padStart(4,"0")}_synthetic`,breakpoints:true}));
+  const entries=Array.from({length:15},(_,idx)=>({idx,version:"7",when:1700000000000+idx,tag:`${String(idx).padStart(4,"0")}_synthetic`,breakpoints:true}));
   writeFileSync(join(root,"drizzle","meta","_journal.json"),JSON.stringify({version:"7",dialect:"postgresql",entries}));
   for(const entry of entries)writeFileSync(join(root,"drizzle",entry.tag+".sql"),`SELECT ${entry.idx};`);
   const rows=readMigrationFiles({migrationsFolder:join(root,"drizzle")}).map(m=>({hash:m.hash,at:String(m.folderMillis)}));

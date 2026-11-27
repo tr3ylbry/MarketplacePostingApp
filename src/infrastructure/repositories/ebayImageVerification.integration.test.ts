@@ -8,7 +8,7 @@ import { disposableVerificationDatabase } from "../../test/disposableVerificatio
 import { listingFixture } from "../../test/fixtures";
 import { EBAY_DISCOVERY_SCOPES } from "../../application/ebayConnection";
 import { realMediaDigest, mediaSessionHash, type RealMediaClaim, type RealMediaReviewGuard } from "../../application/ebayRealMedia";
-import { IMAGE_VERIFICATION_POLICY, type VerificationReference, type VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, type VerificationReference, type VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
 import { DrizzleEbayImageVerificationRepository } from "./drizzleEbayImageVerificationRepository";
 import { DrizzleEbayRealMediaRepository } from "./drizzleEbayRealMediaRepository";
 import { DrizzleListingRepository } from "./drizzleListingRepository";
@@ -122,6 +122,51 @@ it("serializes simultaneous same-parent and same-action claims without orphan hi
   const both = await Promise.allSettled([make(next), make(another)]); expect(both.filter(x => x.status === "fulfilled")).toHaveLength(1);
   expect(await db.select().from(v).where(eq(v.ownerId, owner))).toHaveLength(2);
 });
+it.each([IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY])("permanently binds $targetField across reservation, intent, acknowledgement and profile-switch attempts", async policy => {
+  const other = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+  const reserved = await reserve({ policy });
+  expect(reserved.policy).toEqual(policy); expect(Object.isFrozen(reserved.policy)).toBe(true);
+  expect(await row(reserved.id)).toMatchObject(policy);
+  const before = await snapshot(reserved.id);
+  await expect(reserve({ policy: other })).rejects.toThrow(message); // Same upload, even a fresh action/other field.
+  await expect(repository.closePrepared({ ...reserved, policy: other }, "cancelled")).rejects.toThrow(message);
+  await expect(repository.recordOutcome({ ...reserved, policy: other }, { intentRevision: null, envelope: cancelled })).rejects.toThrow(message);
+  expect(await snapshot(reserved.id)).toBe(before);
+  for (const patch of [{ targetField: other.targetField }, { contractVersion: other.contractVersion }, other]) {
+    await expect(db.update(v).set({ ...patch, revision: 1 }).where(eq(v.id, reserved.id))).rejects.toThrow();
+    expect(await snapshot(reserved.id)).toBe(before);
+  }
+  const fenced = await fence(reserved);
+  await expect(intent({ ...fenced, policy: other })).rejects.toThrow(message);
+  const ref = await intent(fenced); expect(ref.policy).toEqual(policy);
+  const ack = await repository.recordOutcome(ref, { intentRevision: 1, envelope: response });
+  expect(ack.policy).toEqual(policy);
+  expect(await repository.recordOutcome(ref, { intentRevision: 1, envelope: response })).toEqual(ack);
+  await expect(repository.checkIntentContext({ ...ref, policy: other }, guard)).rejects.toThrow(message);
+  await expect(reserve({ policy: other })).rejects.toThrow(message);
+  const fresh = await addParent(); parent=fresh.claim; guard=fresh.guard; content=fresh.content;
+  await expect(reserve({ policy: other, actionHash: ref.actionHash })).rejects.toThrow(message);
+  expect((await reserve({ policy: other })).policy).toEqual(other); // Legitimate unrelated upload control.
+});
+it("serializes primary/maximum reservations for one parent without allocating another GET", async () => {
+  const attempts = await Promise.allSettled([reserve(), reserve({ policy: MAXIMUM_IMAGE_VERIFICATION_POLICY })]);
+  expect(attempts.filter(x => x.status === "fulfilled")).toHaveLength(1);
+  expect(await db.select().from(v).where(eq(v.ownerId, owner))).toHaveLength(1);
+});
+it.each([IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY])("SQL rejects a mismatched $targetField/contract pair on insertion", async policy => {
+  const other = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+  const input = { id: randomUUID(), ownerId: owner, uploadAttemptId: parent.id, actionHash: realMediaDigest(randomUUID()),
+    expectedSourceDigest: content.sourceDigest, expectedDerivativeDigest: content.derivativeDigest, parentPreparingRevision: parent.revision,
+    ...policy, targetField: other.targetField, reviewUntil: await time(20_000), leaseUntil: await time(20_000),
+    createdAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()`, reviewDueAt: sql`clock_timestamp()`, dispositionDueAt: sql`clock_timestamp()` };
+  try { await db.insert(v).values(input); throw Error("Mismatched profile accepted"); }
+  catch (error) {
+    const cause=(error as {cause?:{code?:string;constraint?:string}}).cause;
+    expect(cause).toMatchObject({code:"23514",constraint:"image_verification_profile"});
+  }
+  expect(await db.select().from(v).where(eq(v.ownerId,owner))).toHaveLength(0);
+  expect((await reserve({policy})).policy).toEqual(policy);
+});
 it("serializes competing intent/closure and rejects replay without changing a committed intent", async () => {
   const ref = await fence(await reserve());
   const settled = await Promise.allSettled([intent(ref), repository.closePrepared(ref, "cancelled")]);
@@ -160,7 +205,7 @@ it("keeps lost-ack evidence idempotent before the four-envelope budget and latch
   for (const status of [201, 400, 500]) await repository.recordOutcome(ref, { intentRevision: 1, envelope: { ...response, httpStatus: status } });
   const full = await snapshot(ref.id); expect(await repository.recordOutcome(ref, { intentRevision: 1, envelope: response })).toEqual(ack); expect(await snapshot(ref.id)).toBe(full);
   const extra = { intentRevision: 1 as const, envelope: { ...response, httpStatus: 503 } };
-  expect(await repository.recordOutcome(ref, extra)).toEqual({ evidenceId: null, late: true, overflow: true, associated: false });
+  expect(await repository.recordOutcome(ref, extra)).toEqual({ evidenceId: null, late: true, overflow: true, associated: false, policy: IMAGE_VERIFICATION_POLICY });
   const overflow = await snapshot(ref.id); await repository.recordOutcome(ref, extra); expect(await snapshot(ref.id)).toBe(overflow);
   expect(await events(ref.id)).toHaveLength(4); expect(await repository.status(owner, ref.id)).toMatchObject({ conflict: true, overflow: true, associated: false });
 });

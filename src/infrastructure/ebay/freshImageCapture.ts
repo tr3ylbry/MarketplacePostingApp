@@ -6,7 +6,7 @@ import type { Socket } from "node:net";
 import { z } from "zod";
 import { ownerIdSchema } from "../../application/owner";
 import { mediaHash, mediaId, mediaRecipe, mediaSessionHash } from "../../application/ebayRealMedia";
-import { verificationReferenceSchema } from "../../application/ebayImageVerificationPersistence";
+import { verificationReferenceSchema, IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, sameVerificationPolicy, type VerificationPolicy } from "../../application/ebayImageVerificationPersistence";
 import { borrowPhotoCapacity, type PhotoCapacity } from "../../application/photoCapacity";
 import { CAPTURE_BODY_BYTES, CAPTURE_HEADER_BYTES, CAPTURE_HTTP_MS, CAPTURE_IMAGE_BYTES,
   emptyCapture, inspectCapture, parseCaptureJson, type CaptureReport } from "../../application/ebayCaptureReport";
@@ -76,10 +76,24 @@ export async function downloadFreshImage(handle: unknown, binding: FreshImageBin
 export async function observeFreshImage(bytes: Buffer, token: string, binding: FreshImageBinding, options: {
   signal: AbortSignal; capacity: PhotoCapacity; until: number; monoUntil: number;
 }): Promise<{ report: CaptureReport; handle: FreshImageHandle | null }> {
+  return observe(bytes, token, binding, options, IMAGE_VERIFICATION_POLICY);
+}
+
+/** Separate fixed profile; no caller-supplied URL or response-field selector. */
+export async function observeFreshMaximumImage(bytes: Buffer, token: string, binding: FreshImageBinding, options: {
+  signal: AbortSignal; capacity: PhotoCapacity; until: number; monoUntil: number;
+}): Promise<{ report: CaptureReport; handle: FreshImageHandle | null }> {
+  return observe(bytes, token, binding, options, MAXIMUM_IMAGE_VERIFICATION_POLICY);
+}
+
+async function observe(bytes: Buffer, token: string, binding: FreshImageBinding, options: {
+  signal: AbortSignal; capacity: PhotoCapacity; until: number; monoUntil: number;
+}, policy: VerificationPolicy): Promise<{ report: CaptureReport; handle: FreshImageHandle | null }> {
   let finish: (() => void) | undefined;
   let buffer: Buffer | undefined;
   try {
     const bound = fingerprint(binding), start = clocks();
+    if (!sameVerificationPolicy(binding.reservation.policy, policy)) throw unavailable();
     if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > CAPTURE_IMAGE_BYTES || !token || token.length > 16000 || /[\r\n\0]/.test(token) ||
       options.signal.aborted || !Number.isSafeInteger(options.until) || !Number.isFinite(options.monoUntil)) throw unavailable();
     const until = Math.min(options.until, start.wall + CAPTURE_HTTP_MS, IMAGE_DOWNLOAD_POLICY_CUTOFF);
@@ -108,7 +122,7 @@ export async function observeFreshImage(bytes: Buffer, token: string, binding: F
           check();
           if (!failed && ended && res?.complete && receipt && report.status === 201 && report.outcome === "captured" && report.topLevel === "object" && report.expiration.syntax === "utc") {
             const parsed = parseCaptureJson(buffer!.subarray(0, count)) as Record<string, unknown>;
-            const url = parsed.imageUrl, expiry = parsed.expirationDate;
+            const url = parsed[policy.targetField], expiry = parsed.expirationDate;
             imageRequestTarget(url);
             if (typeof url !== "string" || typeof expiry !== "string") throw unavailable();
             const expiresAt = Date.parse(expiry);

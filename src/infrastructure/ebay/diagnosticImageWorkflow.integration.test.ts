@@ -6,7 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
-import { diagnosticImageWire, SYNTHETIC_PRIMARY } from "../../test/diagnosticImageWire";
+import { diagnosticImageWire, SYNTHETIC_PRIMARY, SYNTHETIC_MAXIMUM } from "../../test/diagnosticImageWire";
 import { imageWireResponse } from "../../test/imageDownloaderFixtures";
 import * as nativeComparison from "../storage/diagnosticImageDecode";
 import { disposableVerificationDatabase } from "../../test/disposableVerificationDatabase";
@@ -18,7 +18,7 @@ import { createPhotoDerivativeService } from "../../application/photoDerivativeS
 import { acquirePhotoCapacity, releasePhotoCapacity } from "../../application/photoCapacity";
 import { EBAY_DISCOVERY_SCOPES } from "../../application/ebayConnection";
 import { realMediaDigest, type RealMediaClaim, type RealMediaReviewGuard } from "../../application/ebayRealMedia";
-import type { VerificationReference, VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
+import { IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY, type VerificationReference, type VerificationEnvelope } from "../../application/ebayImageVerificationPersistence";
 import { generateVerificationFixture as generateCaptureFixture } from "../storage/verificationFixture";
 import { photoTransformer, PHOTO_RECIPE } from "../storage/photoDerivative/transformPhoto";
 import { DrizzleEbayImageVerificationRepository } from "../repositories/drizzleEbayImageVerificationRepository";
@@ -27,7 +27,7 @@ import { DrizzleMediaCaptureRepository } from "../repositories/drizzleMediaCaptu
 import { DrizzleListingRepository } from "../repositories/drizzleListingRepository";
 import { DrizzleImageRepository } from "../repositories/drizzleImageRepository";
 import { DrizzleEbayConnectionRepository } from "../repositories/drizzleEbayConnectionRepository";
-import { createDiagnosticImageWorkflow, type DiagnosticImageDependencies, type DiagnosticImageOperation } from "./diagnosticImageWorkflow";
+import { createDiagnosticImageWorkflow, createMaximumDiagnosticImageWorkflow, type DiagnosticImageDependencies, type DiagnosticImageOperation } from "./diagnosticImageWorkflow";
 import { mediaRuntime } from "./mediaRuntime";
 import { admitRealMediaEvidence } from "./realMediaEvidence";
 import * as schema from "../db/schema";
@@ -44,6 +44,9 @@ vi.mock("./imageAddressSetPolicy", async original => {
     return value.candidate ? { ...value, candidate: { address: "127.0.0.1", family: 4 as const } } : value;
   } };
 });
+describe.each([IMAGE_VERIFICATION_POLICY, MAXIMUM_IMAGE_VERIFICATION_POLICY])("workflow $targetField", policy => {
+const createWorkflow = policy === MAXIMUM_IMAGE_VERIFICATION_POLICY ? createMaximumDiagnosticImageWorkflow : createDiagnosticImageWorkflow;
+const selectedUrl = policy === MAXIMUM_IMAGE_VERIFICATION_POLICY ? SYNTHETIC_MAXIMUM : SYNTHETIC_PRIMARY;
 let isolated: Awaited<ReturnType<typeof disposableVerificationDatabase>>, db: typeof isolated.db;
 const makeAuth = (database: typeof db) => betterAuth({ ...authOptions(database, { BETTER_AUTH_URL: "https://127.0.0.1:3000",
   BETTER_AUTH_SECRET: randomBytes(32).toString("hex"), GITHUB_CLIENT_ID: "synthetic", GITHUB_CLIENT_SECRET: "synthetic" }),
@@ -101,14 +104,14 @@ beforeEach(async () => {
   } }, photoTransformer, config);
   deps = { auth: auth.api, headers: async () => headers, repository: media, verification, evidence, derive: derivative.derive,
     configHash: () => config, recipe: () => PHOTO_RECIPE, credential: vi.fn(async () => { expect(transactions.getStore()).not.toBe(true); return "synthetic-only"; }) };
-  workflow = createDiagnosticImageWorkflow(deps);
+  workflow = createWorkflow(deps);
   wire.response.dispatch = () => { expect(transactions.getStore()).not.toBe(true); };
   wire.response.before = async (request, bytes) => {
     const boundary = /boundary=(.+)$/.exec(request.headers["content-type"]!)![1];
     const prefix = bytes.indexOf("\r\n\r\n") + 4, suffix = Buffer.byteLength(`\r\n--${boundary}--\r\n`);
     const digest = realMediaDigest(bytes.subarray(prefix, -suffix)), parent = (await parents()).find(p => p.derivativeDigest === digest);
     expect(parent).toMatchObject({ state: "unknown", operation: "capture-only", revision: 1 });
-    expect((await reservations()).find(v => v.uploadAttemptId === parent!.id)).toMatchObject({ phase: "prepared", parentPreparingRevision: 0 });
+    expect((await reservations()).find(v => v.uploadAttemptId === parent!.id)).toMatchObject({ phase: "prepared", parentPreparingRevision: 0, ...policy });
   };
 });
 afterEach(async () => {
@@ -129,7 +132,7 @@ it("migrates repeatably and completes authenticated native POST→intent→GET w
   const result = await complete();
   expect(result).toMatchObject({ state: "unknown", associated: false, retrieved: true, reason: "completed", settlement: "settled", diagnostic: { outcome: "retrieved", bytes: 4, unverified: true, associated: false } });
   expect(order[order.length - 1]).toBe("get-auth"); expect(wire.posts).toHaveLength(1); expect(wire.image.requests).toHaveLength(1); expect(wire.resolver.questions).toHaveLength(2);
-  const raw = wire.image.requests[0].toString(); expect(raw).toContain("GET " + SYNTHETIC_PRIMARY.split(".com")[1] + " HTTP/1.1\r\n"); expect(raw).not.toMatch(/authorization|cookie|referer|synthetic-only/i);
+  const raw = wire.image.requests[0].toString(); expect(raw).toContain("GET " + selectedUrl.split(".com")[1] + " HTTP/1.1\r\n"); expect(raw).not.toMatch(/authorization|cookie|referer|synthetic-only/i);
   expect(source.bytes).toEqual(original); expect(await connections.connection(owner)).toEqual(before);
   expect(deps.credential).toHaveBeenCalledOnce();
   const [parent] = await parents(), [row] = await reservations(); expect(parent.postIntentAt).not.toBeNull(); expect(row).toMatchObject({ phase: "intent-recorded", parentPreparingRevision: 0 });
@@ -185,7 +188,7 @@ it("does not claim acknowledged success after all outcome acknowledgements are l
 it.each(["review-replay", "restart", "changed-source-id"])("never resumes a fenced operation after %s", async kind => {
   const review = await prepare(), op = workflow.confirm(review); operations.push(op); expect((await op.result).retrieved).toBe(true); await op.settled;
   if (kind === "review-replay") expect(() => workflow.confirm(review)).toThrow();
-  else { if (kind === "changed-source-id") imageId = await addPhoto(); workflow = createDiagnosticImageWorkflow(deps); expect((await complete()).retrieved).toBe(false); }
+  else { if (kind === "changed-source-id") imageId = await addPhoto(); workflow = createWorkflow(deps); expect((await complete()).retrieved).toBe(false); }
   expect(wire.posts).toHaveLength(1); expect(wire.image.requests).toHaveLength(1); expect((await parents()).some(p => p.postIntentAt !== null)).toBe(true); await noAdmission();
 });
 it.each(["missing-primary", "unsafe", "duplicate", "truncated", "oversized"])("preserves upload fences and creates no GET intent on %s native create evidence", async kind => {
@@ -208,7 +211,7 @@ it("retains bounded contradictory/late evidence with idempotency and overflow, w
 it.each([false, true])("shares exactly two complete-operation slots through pending authorization and settlement (cancel=%s)", async cancel => {
   const firstImage = imageId, firstDigest = source.sourceDigest;
   source = await generateCaptureFixture(); const secondImage = await addPhoto(), secondDigest = source.sourceDigest;
-  const first = createDiagnosticImageWorkflow(deps), second = createDiagnosticImageWorkflow(deps), third = createDiagnosticImageWorkflow(deps);
+  const first = createWorkflow(deps), second = createWorkflow(deps), third = createWorkflow(deps);
   const ra = await first.prepare(listingId, firstImage, seller, firstDigest), rb = await second.prepare(listingId, secondImage, seller, secondDigest), rc = await third.prepare(listingId, firstImage, seller, firstDigest);
   const original = verification.checkIntentContext.bind(verification);
   let release!: () => void, entered = 0; const gate = new Promise<void>(resolve => { release = resolve; });
@@ -417,4 +420,17 @@ it.each(["cancelled","context","expiry","lost-ack"])("retains fences and facts o
   expect(wire.posts).toHaveLength(1);expect(wire.image.requests).toHaveLength(1);expect((await parents())[0].postIntentAt).not.toBeNull();
   expect((await reservations())[0].requestIntentAt).not.toBeNull();await noAdmission();
  }finally{resolve(Buffer.alloc(900_000));await op.settled;spy.mockRestore();returned?.fill(0);}
+});
+
+it.each(["reservation", "intent", "acknowledgement"])("refuses a changed profile in the %s acknowledgement", async stage => {
+  const other = policy === IMAGE_VERIFICATION_POLICY ? MAXIMUM_IMAGE_VERIFICATION_POLICY : IMAGE_VERIFICATION_POLICY;
+  if(stage === "reservation") { const original=vi.mocked(verification.reserveVerification).getMockImplementation()!; vi.mocked(verification.reserveVerification).mockImplementation(async (...args)=>({...await original(...args),policy:other})); }
+  if(stage === "intent") { const original=verification.recordRequestIntent.bind(verification); vi.spyOn(verification,"recordRequestIntent").mockImplementation(async (...args)=>({...await original(...args),policy:other})); }
+  if(stage === "acknowledgement") { const original=verification.recordOutcome.bind(verification); vi.spyOn(verification,"recordOutcome").mockImplementation(async (...args)=>({...await original(...args),policy:other})); }
+  const result=await complete(); expect(result.reason).toBe("unavailable");
+  expect(wire.posts).toHaveLength(stage === "reservation" ? 0 : 1);
+  expect(wire.image.requests).toHaveLength(stage === "acknowledgement" ? 1 : 0);
+  if(stage === "acknowledgement") expect(result.acknowledgement).toBe("uncertain");
+  await noAdmission();
+});
 });
